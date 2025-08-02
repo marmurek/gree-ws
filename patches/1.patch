@@ -1,0 +1,152 @@
+From 54fa75ff7307d6c552a36752b83d905af44e60e3 Mon Sep 17 00:00:00 2001
+From: Nikolai Ryzhkov <me@namezys.com>
+Date: Mon, 5 May 2025 01:13:46 +0200
+Subject: [PATCH 1/3] add property to disable buzzer
+
+---
+ README.md             | 19 +++++++++++++++++++
+ greeclimate/device.py | 13 +++++++++++++
+ 2 files changed, 32 insertions(+)
+
+diff --git a/README.md b/README.md
+index 5a60fd4..5158bcb 100644
+--- a/README.md
++++ b/README.md
+@@ -86,6 +86,25 @@ device.target_humidity = 45
+ await device.push_state_update()
+ ```
+ 
++#### Disable beep
++
++In-door units have a very annoying beep on each status push.
++Hopefully, there is a parameter that can help to avoid it.
++
++Unfortunately, it doesn't work on some firmware versions.
++
++```python
++device = Device(...)
++device.beep = False
++await device.push_state_update()
++```
++
++This setting is not stored on the device and must be set in python each time you want to use it.
++
++**Based on the following discussion**
++
++- [Command to disable beeping](https://github.com/tomikaa87/gree-remote/issues/44)
++
+ ## Debugging
+ 
+ Maybe the reason you're here is that you're working with Home Assistant and your device isn't being detected.
+diff --git a/greeclimate/device.py b/greeclimate/device.py
+index 486a0dc..651bc98 100644
+--- a/greeclimate/device.py
++++ b/greeclimate/device.py
+@@ -178,6 +178,7 @@ def __init__(self, device_info: DeviceInfo, timeout: int = 120, bind_timeout: in
+         self.check_version = True
+         self._properties = {}
+         self._dirty = []
++        self._beep = False
+ 
+     async def bind(
+         self,
+@@ -329,6 +330,10 @@ async def push_state_update(self, wait_for: float = 30):
+                     Props.TEMP_UNIT.value
+                 )
+ 
++        if not self._beep:
++            self._logger.debug("Disable nuzzer")
++            props["Buzzer_ON_OFF"] = 1
++
+         self._dirty.clear()
+ 
+         try:
+@@ -569,3 +574,11 @@ def clean_filter(self) -> bool:
+     @property
+     def water_full(self) -> bool:
+         return bool(self.get_property(Props.WATER_FULL))
++
++    @property
++    def beep(self) -> bool:
++        return self._beep
++
++    @beep.setter
++    def beep(self, value: bool):
++        self._beep = bool(value)
+
+From b5aaf90b19a67301091a6f9379ebddd1e560e6b6 Mon Sep 17 00:00:00 2001
+From: Nikolai Ryzhkov <me@namezys.com>
+Date: Mon, 5 May 2025 18:30:17 +0200
+Subject: [PATCH 2/3] add test
+
+---
+ tests/test_device.py | 22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/tests/test_device.py b/tests/test_device.py
+index 111953b..b408332 100644
+--- a/tests/test_device.py
++++ b/tests/test_device.py
+@@ -382,6 +382,7 @@ async def test_set_properties(cipher, send):
+     device.steady_heat = True
+     device.power_save = True
+     device.target_humidity = 30
++    device.beep = True
+ 
+     await device.push_state_update()
+     send.assert_called_once()
+@@ -733,4 +734,23 @@ def test_device_key_set_get():
+     device.device_cipher = CipherV1()
+     device.device_key = "fake_key"
+     assert device.device_key == "fake_key"
+-    
+\ No newline at end of file
++
++
++@pytest.mark.asyncio
++async def test_disable_beep(cipher, send):
++    """Check that disabled beep add Buzzer_ON_OFF."""
++    device = await generate_device_mock_async()
++
++    device.power = True
++    device.beep = False
++    await device.push_state_update()
++    assert send.call_count == 1
++    assert set(send.call_args_list[0].args[0]['pack']['opt']) == {'Pow', 'Buzzer_ON_OFF'}
++
++    send.reset_mock()
++
++    device.power = False
++    device.beep = True
++    await device.push_state_update()
++    assert send.call_count == 1
++    assert set(send.call_args_list[0].args[0]['pack']['opt']) == {'Pow'}
+
+From e5f833a438590a184563eeb62f98b412d71f2887 Mon Sep 17 00:00:00 2001
+From: Nikolai Ryzhkov <me@namezys.com>
+Date: Mon, 5 May 2025 18:34:07 +0200
+Subject: [PATCH 3/3] add test simple
+
+---
+ tests/test_device.py | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/tests/test_device.py b/tests/test_device.py
+index b408332..923a878 100644
+--- a/tests/test_device.py
++++ b/tests/test_device.py
+@@ -747,6 +747,8 @@ async def test_disable_beep(cipher, send):
+     assert send.call_count == 1
+     assert set(send.call_args_list[0].args[0]['pack']['opt']) == {'Pow', 'Buzzer_ON_OFF'}
+ 
++    assert not device.beep
++
+     send.reset_mock()
+ 
+     device.power = False
+@@ -754,3 +756,5 @@ async def test_disable_beep(cipher, send):
+     await device.push_state_update()
+     assert send.call_count == 1
+     assert set(send.call_args_list[0].args[0]['pack']['opt']) == {'Pow'}
++
++    assert device.beep

@@ -1,0 +1,57 @@
+From a9b5bdc3bc3e3c0b475196eb651abdb7a0a54638 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Micha=C5=82=20Le=C5=9Bniewski?= <mlesniew@gmail.com>
+Date: Wed, 16 Oct 2024 21:43:48 +0200
+Subject: [PATCH] Add support for packet format used by Gree Pular
+
+Some Gree AC models, including the Gree Pular use a different format
+of the "res" packets, which are sent in response to commands.  This
+commit extends the code to support this format without affecting the
+format used by other models.
+---
+ greeclimate/network.py | 2 +-
+ tests/test_network.py  | 7 ++++---
+ 2 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/greeclimate/network.py b/greeclimate/network.py
+index b8e432b..88d9068 100644
+--- a/greeclimate/network.py
++++ b/greeclimate/network.py
+@@ -222,7 +222,7 @@ def packet_received(self, obj, addr: IPAddr) -> None:
+         params = {
+             Response.BIND_OK.value: lambda o, a: [o["pack"]["key"]],
+             Response.DATA.value: lambda o, a: [dict(zip(o["pack"]["cols"], o["pack"]["dat"]))],
+-            Response.RESULT.value: lambda o, a: [dict(zip(o["pack"]["opt"], o["pack"]["val"]))],
++            Response.RESULT.value: lambda o, a: [dict(zip(o["pack"]["opt"], o["pack"].get("val", []) or o["pack"].get("p", [])))],
+         }
+         handlers = {
+             Response.BIND_OK.value: lambda *args: self.__handle_device_bound(*args),
+diff --git a/tests/test_network.py b/tests/test_network.py
+index 18c9ffa..7f7f14a 100644
+--- a/tests/test_network.py
++++ b/tests/test_network.py
+@@ -375,7 +375,8 @@ def test_handle_state_update():
+     assert protocol.state == {'key': 'value'}
+ 
+ 
+-def test_handle_result_update():
++@pytest.mark.parametrize('values_key', ['val', 'p'])
++def test_handle_result_update(values_key):
+ 
+     # Arrange
+     protocol = DeviceProtocol2Test()
+@@ -386,7 +387,7 @@ def test_handle_result_update():
+         'pack': {
+             't': 'res',
+             'opt': list(state.keys()),
+-            'val': list(state.values())
++            values_key: list(state.values())
+         }
+     }, ("0.0.0.0", 0))
+ 
+@@ -571,4 +572,4 @@ def test_device_key_get_set():
+     
+     # Assert
+     assert protocol.device_key == key
+-    
+\ No newline at end of file
++    

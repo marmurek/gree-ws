@@ -1,0 +1,143 @@
+From 6824b501f48c703bd8e25c4a4afc74757dfb8422 Mon Sep 17 00:00:00 2001
+From: Nikolai Ryzhkov <me@namezys.com>
+Date: Mon, 5 May 2025 00:31:30 +0200
+Subject: [PATCH 1/4] small fixes in code style
+
+---
+ greeclimate/device.py    | 2 +-
+ greeclimate/discovery.py | 1 +
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/greeclimate/device.py b/greeclimate/device.py
+index 486a0dc..333680b 100644
+--- a/greeclimate/device.py
++++ b/greeclimate/device.py
+@@ -544,7 +544,7 @@ def power_save(self, value: bool):
+ 
+     @property
+     def target_humidity(self) -> int:
+-        15 + (self.get_property(Props.HUM_SET) * 5)
++        return 15 + (self.get_property(Props.HUM_SET) * 5)
+ 
+     @target_humidity.setter
+     def target_humidity(self, value: int):
+diff --git a/greeclimate/discovery.py b/greeclimate/discovery.py
+index 0eb7015..7ac5f1b 100644
+--- a/greeclimate/discovery.py
++++ b/greeclimate/discovery.py
+@@ -73,6 +73,7 @@ def add_listener(self, listener: Listener) -> list[Task]:
+         if listener not in self._listeners:
+             self._listeners.append(listener)
+             return [self._create_task(listener.device_found(x)) for x in self.devices]
++        return []
+ 
+     def remove_listener(self, listener: Listener) -> bool:
+         """Remove a listener that has already been registered.
+
+From c1db572743ff97f94477233f512a2f44b380ed96 Mon Sep 17 00:00:00 2001
+From: Nikolai Ryzhkov <me@namezys.com>
+Date: Mon, 5 May 2025 01:28:38 +0200
+Subject: [PATCH 2/4] fix in another way
+
+---
+ greeclimate/discovery.py | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/greeclimate/discovery.py b/greeclimate/discovery.py
+index 7ac5f1b..08aefa5 100644
+--- a/greeclimate/discovery.py
++++ b/greeclimate/discovery.py
+@@ -58,7 +58,7 @@ def devices(self) -> list[DeviceInfo]:
+         return self._device_infos
+ 
+     # Listener management
+-    def add_listener(self, listener: Listener) -> list[Task]:
++    def add_listener(self, listener: Listener) -> list[Task] | None:
+         """Add a listener that will receive discovery events.
+ 
+         Adding a listener will cause all currently known device to trigger a
+@@ -68,12 +68,12 @@ def add_listener(self, listener: Listener) -> list[Task]:
+             listener (Listener): A listener object which will receive events
+ 
+         Returns:
+-            List[Coro]: List of tasks for device found events.
++            List[Coro]: List of tasks for device found events or None if lister was added early.
+         """
+         if listener not in self._listeners:
+             self._listeners.append(listener)
+             return [self._create_task(listener.device_found(x)) for x in self.devices]
+-        return []
++        return None
+ 
+     def remove_listener(self, listener: Listener) -> bool:
+         """Remove a listener that has already been registered.
+
+From 33d9ba72f603640ae0701c5ab98d3f43a81429f8 Mon Sep 17 00:00:00 2001
+From: Nikolai Ryzhkov <me@namezys.com>
+Date: Mon, 5 May 2025 13:02:40 +0200
+Subject: [PATCH 3/4] update target_humidity and tests
+
+---
+ greeclimate/device.py | 5 +++--
+ tests/test_device.py  | 1 +
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/greeclimate/device.py b/greeclimate/device.py
+index 333680b..92b181f 100644
+--- a/greeclimate/device.py
++++ b/greeclimate/device.py
+@@ -543,8 +543,9 @@ def power_save(self, value: bool):
+         self.set_property(Props.POWER_SAVE, int(value))
+ 
+     @property
+-    def target_humidity(self) -> int:
+-        return 15 + (self.get_property(Props.HUM_SET) * 5)
++    def target_humidity(self) -> int | None:
++        value = self.get_property(Props.HUM_SET)
++        return (15 + value * 5) if value is not None else None
+ 
+     @target_humidity.setter
+     def target_humidity(self, value: int):
+diff --git a/tests/test_device.py b/tests/test_device.py
+index 111953b..c8d1149 100644
+--- a/tests/test_device.py
++++ b/tests/test_device.py
+@@ -441,6 +441,7 @@ async def test_uninitialized_properties(cipher, send):
+     assert device.current_temperature is None
+     assert device.temperature_units is None
+     assert device.fan_speed is None
++    assert device.target_humidity is None
+     assert not device.fresh_air
+     assert not device.xfan
+     assert not device.anion
+
+From fb125c8fb0deadc7ecfe6d04082cbfeccdfe1fab Mon Sep 17 00:00:00 2001
+From: Nikolai Ryzhkov <me@namezys.com>
+Date: Mon, 5 May 2025 13:04:16 +0200
+Subject: [PATCH 4/4] old python version
+
+---
+ greeclimate/device.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/greeclimate/device.py b/greeclimate/device.py
+index 92b181f..c9e09f0 100644
+--- a/greeclimate/device.py
++++ b/greeclimate/device.py
+@@ -2,6 +2,7 @@
+ import enum
+ import logging
+ import re
++import typing
+ from asyncio import AbstractEventLoop
+ from enum import IntEnum, unique
+ from typing import Union
+@@ -543,7 +544,7 @@ def power_save(self, value: bool):
+         self.set_property(Props.POWER_SAVE, int(value))
+ 
+     @property
+-    def target_humidity(self) -> int | None:
++    def target_humidity(self) -> typing.Optional[int]:
+         value = self.get_property(Props.HUM_SET)
+         return (15 + value * 5) if value is not None else None
+ 
