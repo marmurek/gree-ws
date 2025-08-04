@@ -302,72 +302,72 @@ class GreeClimateManager:
         modified = False
 
         if data.power is not None:
+            modified = device.power != data.power or modified
             device.power = data.power
-            modified = True
         if data.mode is not None:
             mode = from_device_enum(data.mode, Mode)
             if mode is not None:
-                device.mode = mode.value()
-                modified = True
+                modified = device.mode != mode.value or modified
+                device.mode = mode.value
             else:
                 raise HTTPException(status_code=422, detail=f"Invalid mode: {data.mode}")
         if data.target_temperature is not None:
+            modified = device.target_temperature != data.target_temperature or modified
             device.target_temperature = data.target_temperature
-            modified = True
         if data.target_humidity is not None:
+            modified = device.target_humidity != data.target_humidity or modified
             device.target_humidity = data.target_humidity
-            modified = True
         if data.fan_speed is not None:
             fan_speed = from_device_enum(data.fan_speed, FanSpeed)
             if fan_speed is not None:
-                device.fan_speed = fan_speed.value()
-                modified = True
+                modified = device.fan_speed != fan_speed.value or modified
+                device.fan_speed = fan_speed.value
             else:
                 raise HTTPException(status_code=422, detail=f"Invalid fan speed: {data.fan_speed}")
         if data.horizontal_swing is not None:
             horizontal_swing = from_device_enum(data.horizontal_swing, HorizontalSwing)
             if horizontal_swing is not None:
-                device.horizontal_swing = horizontal_swing.value()
-                modified = True
+                modified = device.horizontal_swing != horizontal_swing.value or modified
+                device.horizontal_swing = horizontal_swing.value
             else:
                 raise HTTPException(status_code=422, detail=f"Invalid horizontal swing: {data.horizontal_swing}")
         if data.vertical_swing is not None:
             vertical_swing = from_device_enum(data.vertical_swing, VerticalSwing)
             if vertical_swing is not None:
-                device.vertical_swing = vertical_swing.value()
-                modified = True
+                modified = device.vertical_swing != vertical_swing.value or modified
+                device.vertical_swing = vertical_swing.value
             else:
                 raise HTTPException(status_code=422, detail=f"Invalid vertical swing: {data.vertical_swing}")
         if data.turbo is not None:
+            modified = device.turbo != data.turbo or modified
             device.turbo = data.turbo
-            modified = True
         if data.quiet is not None:
+            modified = device.quiet != data.quiet or modified
             device.quiet = data.quiet
-            modified = True
         if data.light is not None:
+            modified = device.light != data.light or modified
             device.light = data.light
-            modified = True
         if data.fresh_air is not None:
+            modified = device.fresh_air != data.fresh_air or modified
             device.fresh_air = data.fresh_air
-            modified = True
         if data.xfan is not None:
+            modified = device.xfan != data.xfan or modified
             device.xfan = data.xfan
-            modified = True
         if data.anion is not None:
+            modified = device.anion != data.anion or modified
             device.anion = data.anion
-            modified = True
         if data.sleep is not None:
+            modified = device.sleep != data.sleep or modified
             device.sleep = data.sleep
-            modified = True
         if data.power_save is not None:
+            modified = device.power_save != data.power_save or modified
             device.power_save = data.power_save
-            modified = True
         if data.beep is not None:
+            modified = device.beep != data.beep or modified
             device.beep = data.beep
-            modified = True
         if data.steady_heat is not None:
+            modified = device.steady_heat != data.steady_heat or modified
             device.steady_heat = data.steady_heat
-            modified = True
         
         try:
             await device.push_state_update()
@@ -422,7 +422,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Gree Climate API",
     description="REST and WebSocket API for controlling Gree air conditioners with real-time state monitoring",
-    version="1.1.1",
+    version="1.1.2",
     lifespan=lifespan
 )
 
