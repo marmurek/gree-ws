@@ -12,6 +12,7 @@ import uvicorn
 from greeclimate.discovery import Discovery
 from greeclimate.device import Device, HorizontalSwing, VerticalSwing, Mode, FanSpeed
 from greeclimate.exceptions import DeviceNotBoundError, DeviceTimeoutError
+from threading import Lock
 import re
 
 from enum import Enum
@@ -120,25 +121,30 @@ class RootResponse(BaseModel):
 class ConnectionManager:
     def __init__(self, args: argparse.Namespace):
         self.active_connections: Set[WebSocket] = set()
+        self.lock = Lock()
         self.args = args
         
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections.add(websocket)
-        logger.info(f"WebSocket connected {websocket.client.host}")
+        with self.lock:
+            self.active_connections.add(websocket)
         
     def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-        logger.info(f"WebSocket disconnected {websocket.client.host}")
+        with self.lock:
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
         
     async def broadcast(self, data: dict):
         disconnected = set()
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(json.dumps(data))
-            except:
-                disconnected.add(connection)
+        with self.lock:
+            for connection in self.active_connections:
+                try:
+                    await connection.send_text(json.dumps(data))
+                except (WebSocketDisconnect, RuntimeError):
+                    # If the connection is closed or invalid, remove it
+                    disconnected.add(connection)
+                except Exception as e:
+                    logger.error(f"Error sending data to WebSocket {connection.client.host}: {e}")
             
             for conn in disconnected:
                 self.active_connections.discard(conn)
@@ -397,7 +403,7 @@ def get_cli_args() -> argparse.Namespace:
 
 args = get_cli_args()
 
-logging.getLogger().setLevel(logging.DEBUG if args.verbose else logging.WARNING )
+logging.getLogger().setLevel(logging.DEBUG if args.verbose else logging.INFO )
 logging.getLogger("greeclimate").setLevel(logging.DEBUG if args.verbose else logging.WARNING )
 
 climate_manager = GreeClimateManager(args)
@@ -416,7 +422,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Gree Climate API",
     description="REST and WebSocket API for controlling Gree air conditioners with real-time state monitoring",
-    version="1.1.0",
+    version="1.1.1",
     lifespan=lifespan
 )
 
