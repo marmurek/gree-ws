@@ -69,10 +69,12 @@ ws.send(JSON.stringify({
   "data": {
     "power": true,
     "target_temperature": 22
+    /* [...] */
   }
 }));
 ```
 
+You can update single or multiple parameters at once. The `mac` field is the device's MAC address, and the `data` field contains the parameters to update.
 If the command had an effect, you will soon receive a `report` message; otherwise, you will receive a `not_changed` message.
 
 #### 7. Errors
