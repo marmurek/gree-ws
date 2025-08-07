@@ -259,9 +259,17 @@ class GreeClimateManager:
                 current = current_state.dict()
                 last = last_state.dict()
                 changes = {}
+                
+                def convert_if_enum(val):
+                    if isinstance(val, Enum):
+                        return val.name
+                    return val
+
                 for key in current:
                     if current[key] != last.get(key):
-                        changes[key] = {"old": getattr(last_state, key), "new": getattr(current_state, key)}
+                        old = convert_if_enum(getattr(last_state, key))
+                        new = convert_if_enum(getattr(current_state, key))
+                        changes[key] = {"old": old, "new": new}
 
                 if changes:
                     logger.info(f"State change detected for device {mac}: {changes}")
@@ -422,7 +430,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Gree Climate API",
     description="REST and WebSocket API for controlling Gree air conditioners with real-time state monitoring",
-    version="1.1.2",
+    version="1.1.3",
     lifespan=lifespan
 )
 
