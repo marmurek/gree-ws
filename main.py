@@ -209,7 +209,7 @@ class GreeClimateManager:
                 return self.view_models.get(mac, {})
         
         return DeviceViewModel(
-            mac=device.device_info.name,
+            mac=device.device_info.mac.replace(":", ""),
             ip=device.device_info.ip,
             power=device.power,
             mode=to_device_enum(Mode(device.mode), DeviceMode),
@@ -430,7 +430,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Gree Climate API",
     description="REST and WebSocket API for controlling Gree air conditioners with real-time state monitoring",
-    version="1.1.3",
+    version="1.1.4",
     lifespan=lifespan
 )
 
