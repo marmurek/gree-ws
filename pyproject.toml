@@ -8,7 +8,8 @@
 #   black .          format the code
 #   black --check .  verify formatting without touching files
 #   mypy             check types (files to check are configured below)
-#   pylint main.py   check style and common mistakes
+#   pylint main.py tests   check style and common mistakes
+#   pytest           run the test suite
 
 [tool.black]
 # Wider than the 88 default: the Pydantic field definitions and the FastAPI
@@ -16,9 +17,24 @@
 line-length = 120
 target-version = ["py313"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+
+# A deadlocked event loop cannot time itself out - asyncio.wait_for needs the
+# very loop that is stuck. Without an external timeout the suite would hang
+# forever instead of failing, so the deadlock regression tests need this.
+timeout = 60
+timeout_method = "signal"
+
 [tool.mypy]
 python_version = "3.13"
-files = ["main.py"]
+files = ["main.py", "tests"]
+
+# Without this mypy does not understand Pydantic field defaults and reports
+# every model construction as missing arguments.
+plugins = ["pydantic.mypy"]
 
 # greeclimate ships no py.typed marker, so its annotations are invisible to
 # mypy by default. Following the source anyway is what makes this check
