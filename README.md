@@ -128,6 +128,7 @@ The following environment variables can be set to control the application:
 - `PORT` — Port on which the application will listen (default: 8123)
 - `DISCOVERY_TIMEOUT` — Device discovery timeout in seconds (default: 3)
 - `POLLING_INTERVAL` — Device polling interval in seconds (default: 2)
+- `RESPONSE_TIMEOUT` — How long to wait for a device to answer a state request, in seconds (default: 5)
 - `VERBOSE` — Enable verbose logging (default: false)
 
 Example usage with Docker:

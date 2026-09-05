@@ -6,6 +6,7 @@ getter and setter are the library's own - only the network is simulated.
 """
 
 import argparse
+import asyncio
 import sys
 from pathlib import Path
 
@@ -18,9 +19,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # pylint: disable=wrong-import-position
 from greeclimate.cipher import CipherV1
-from greeclimate.device import Device, DeviceInfo
+from greeclimate.device import DeviceInfo
 
 import main
+from main import GreeDevice
 
 FAKE_KEY = "abcdefgh12345678"
 MAC = "aabbcc001122"
@@ -75,11 +77,17 @@ class FakeTransport:
         """No-op"""
 
 
-class FakeDevice(Device):
-    """A real greeclimate Device with the UDP layer replaced.
+class FakeDevice(GreeDevice):
+    """A real greeclimate device with the UDP layer replaced.
 
     `sent` records the plaintext packets, `alive` controls whether the unit
-    answers, and `state` is what it answers with.
+    answers, `state` is what it answers with and `response_delay` is how long it
+    takes to answer.
+
+    Answers arrive through the event loop rather than inside `send`, because
+    that is what a real unit does: the reply is a separate UDP datagram. Code
+    that reads a property straight after asking for it therefore sees the
+    previous answer here too, exactly as it would against real hardware.
     """
 
     def __init__(self, *args, **kwargs):
@@ -89,6 +97,7 @@ class FakeDevice(Device):
         self.sent: list = []
         self.alive = True
         self.state = mock_state()
+        self.response_delay = 0.01
 
     async def send(self, obj, addr=None, cipher=None):
         packet_type = obj["pack"]["t"]
@@ -97,6 +106,11 @@ class FakeDevice(Device):
 
         if not self.alive:
             return
+
+        asyncio.get_running_loop().call_later(self.response_delay, self._answer, packet_type)
+
+    def _answer(self, packet_type: str) -> None:
+        """Deliver the unit's reply, the way a datagram would arrive"""
         if packet_type == "bind":
             self.device_cipher = CipherV1(FAKE_KEY.encode())
             self.handle_device_bound(FAKE_KEY)
@@ -109,10 +123,32 @@ class FakeDevice(Device):
         return dict(zip(command["pack"]["opt"], command["pack"]["p"]))
 
 
+async def run_polling_briefly(climate_manager, seconds: float = 2.0) -> list:
+    """Run one device's polling loop for a moment and return what it broadcast"""
+    broadcasts: list = []
+
+    async def capture(data):
+        broadcasts.append(data)
+
+    climate_manager.connection_manager.broadcast = capture
+
+    task = asyncio.create_task(climate_manager._poll_device_state(MAC))  # pylint: disable=protected-access
+    await asyncio.sleep(seconds)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    return broadcasts
+
+
 @pytest.fixture(name="cli_args")
 def cli_args_fixture() -> argparse.Namespace:
     """Command line arguments with a fast polling interval"""
-    return argparse.Namespace(discovery_timeout=1, polling_interval=1, verbose=False, port=8123, dev_mode=False)
+    return argparse.Namespace(
+        discovery_timeout=1, polling_interval=1, response_timeout=1.0, verbose=False, port=8123, dev_mode=False
+    )
 
 
 @pytest.fixture(name="device")
@@ -122,6 +158,33 @@ def device_fixture() -> FakeDevice:
     unit.device_cipher = CipherV1(FAKE_KEY.encode())
     unit.handle_state_update(**unit.state)
     return unit
+
+
+@pytest.fixture(name="discovery")
+def discovery_fixture(monkeypatch):
+    """Make discovery return chosen units, built by an optional custom factory.
+
+    Returns the list the built units are appended to, so a test can inspect
+    what the manager created.
+    """
+
+    def configure(infos, factory=None):
+        created: list = []
+        build_unit = factory or FakeDevice
+
+        def build(info, *args, **kwargs):
+            unit = build_unit(info, *args, **kwargs)
+            created.append(unit)
+            return unit
+
+        async def scan(_self, wait_for=0, bcast_ifaces=None):  # pylint: disable=unused-argument
+            return list(infos)
+
+        monkeypatch.setattr(main, "GreeDevice", build)
+        monkeypatch.setattr("greeclimate.discovery.Discovery.scan", scan)
+        return created
+
+    return configure
 
 
 @pytest.fixture(name="manager")

@@ -3,6 +3,7 @@ import json
 import logging
 import argparse
 import re
+import time
 from typing import Dict, Optional, Set, List, Annotated
 from enum import Enum
 from contextlib import asynccontextmanager
@@ -76,6 +77,50 @@ def normalize_mac(mac: str) -> str:
 # The device stores the target humidity as (value - 15) / 5, so only multiples of 5
 # survive a write/read round trip. HUMIDITY_MIN/HUMIDITY_MAX come from greeclimate.
 HUMIDITY_STEP = 5
+
+
+class GreeDevice(Device):
+    """A greeclimate device whose state requests can be awaited.
+
+    greeclimate speaks UDP and never waits: `update_state()` puts a request on
+    the wire and returns, while the answer arrives later through
+    `handle_state_update`. Reading the properties straight after the call
+    therefore returns the *previous* answer, and a unit that has stopped
+    answering is indistinguishable from one that has nothing new to say.
+
+    This subclass signals the arrival of an answer, so a caller can wait for the
+    state it just asked for and find out whether it ever came.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._state_received = asyncio.Event()
+        self.last_response: Optional[float] = None
+
+    def handle_state_update(self, **kwargs) -> None:
+        super().handle_state_update(**kwargs)
+        self.last_response = time.monotonic()
+        self._state_received.set()
+
+    @property
+    def silent_for(self) -> Optional[float]:
+        """Seconds since the unit last answered, or None if it never has"""
+        return None if self.last_response is None else time.monotonic() - self.last_response
+
+    async def refresh_state(self, timeout: float) -> bool:
+        """Ask for the current state and wait for it.
+
+        Returns True when an answer arrived, False when the unit stayed silent.
+        """
+        self._state_received.clear()
+        await self.update_state()
+
+        try:
+            await asyncio.wait_for(self._state_received.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
 
 # Pydantic models for API
 type MacAddress = Annotated[
@@ -303,7 +348,8 @@ class GreeClimateManager:
 
     def __init__(self, args: argparse.Namespace):
         self.args = args
-        self.devices: Dict[MacAddress, Device] = {}
+        self.devices: Dict[MacAddress, GreeDevice] = {}
+        self.missed_responses: Dict[MacAddress, int] = {}
         self.discovery = Discovery()
         self.connection_manager = ConnectionManager(args)
         self.view_models: Dict[MacAddress, DeviceViewModel] = {}
@@ -318,48 +364,89 @@ class GreeClimateManager:
 
         try:
             found_devices = await self.discovery.scan(wait_for=self.args.discovery_timeout)
-            for device_info in found_devices:
-                try:
-                    device = Device(device_info)
-                    await device.bind()
-
-                    await asyncio.sleep(2)  # Wait a bit before starting polling
-
-                    await device.update_state()
-
-                    self.devices[normalize_mac(device_info.mac)] = device
-                    logger.info("Device bound: %s at %s", device_info.name, device_info.ip)
-
-                except (DeviceNotBoundError, DeviceTimeoutError) as e:
-                    logger.error("Failed to bind device %s: %s", device_info.ip, e)
-                except Exception as e:
-                    logger.error("Unexpected error binding device %s: %s", device_info.ip, e)
-
         except Exception as e:
             logger.error("Discovery failed: %s", e)
+            found_devices = []
+
+        # Units are independent, so bind them at the same time rather than
+        # paying the handshake once per device in sequence.
+        await asyncio.gather(*(self._bind_device(info) for info in found_devices))
 
         logger.info("Discovery complete. Found %d devices. Initializing polling tasks...", len(self.devices))
-        await asyncio.sleep(5)  # Wait a bit before starting polling
 
-        try:
-            for mac in self.devices:
-                try:
-                    current_state = await self._get_device_view_model(mac)
-                    self.view_models[mac] = current_state
+        for mac in list(self.devices):
+            try:
+                # _bind_device already waited for a fresh state, so build the
+                # first view from it rather than asking every unit a second time.
+                self.view_models[mac] = await self._get_device_view_model(mac, update_state=False)
+                await self._start_polling_for_device(mac)
 
-                    await self._start_polling_for_device(mac)
-
-                except (DeviceNotBoundError, DeviceTimeoutError) as e:
-                    logger.error("Failed to start polling device %s: %s", mac, e)
-                except Exception as e:
-                    logger.error("Unexpected error start polling device %s: %s", mac, e)
-
-        except Exception as e:
-            logger.error("Start polling failed: %s", e)
+            except (DeviceNotBoundError, DeviceTimeoutError) as e:
+                logger.error("Failed to start polling device %s: %s", mac, e)
+            except Exception as e:
+                logger.error("Unexpected error start polling device %s: %s", mac, e)
 
         logger.info("Polling init finished.")
 
         return list(self.view_models.keys())
+
+    async def _bind_device(self, device_info) -> None:
+        """Bind one unit and confirm it reports its state before keeping it"""
+        device = None
+        try:
+            # greeclimate always tries CipherV1 first and only falls back to
+            # CipherV2 after bind_timeout, so a newer unit costs a full timeout
+            # of dead air at startup. Its default is 10s; ours is the same wait
+            # we allow for any other answer from a unit.
+            device = GreeDevice(device_info, bind_timeout=self.args.response_timeout)
+            await device.bind()
+
+            # Binding only proves the unit answered the handshake. Waiting for a
+            # real state answer is what tells us it is actually usable.
+            if not await device.refresh_state(self.args.response_timeout):
+                logger.error("Device %s bound but never reported its state", device_info.ip)
+                device.close()
+                return
+
+            self.devices[normalize_mac(device_info.mac)] = device
+            logger.info("Device bound: %s at %s", device_info.name, device_info.ip)
+
+        except (DeviceNotBoundError, DeviceTimeoutError) as e:
+            logger.error("Failed to bind device %s: %s", device_info.ip, e)
+            self._close_quietly(device)
+        except Exception as e:
+            logger.error("Unexpected error binding device %s: %s", device_info.ip, e)
+            self._close_quietly(device)
+
+    @staticmethod
+    def _close_quietly(device: Optional[GreeDevice]) -> None:
+        """Release a device's socket, ignoring one that was never opened"""
+        if device is None:
+            return
+        try:
+            device.close()
+        except Exception as e:  # the socket may never have been created
+            logger.debug("Closing device socket failed: %s", e)
+
+    def _record_response(self, mac: MacAddress, answered: bool) -> None:
+        """Track whether a unit is still talking to us, and say so once"""
+        missed = self.missed_responses.get(mac, 0)
+
+        if answered:
+            if missed:
+                logger.info("Device %s is answering again after %d missed requests", mac, missed)
+            self.missed_responses[mac] = 0
+            return
+
+        self.missed_responses[mac] = missed + 1
+        if missed == 0:
+            device = self.devices.get(mac)
+            silence = device.silent_for if device else None
+            logger.warning(
+                "Device %s did not answer a state request (silent for %s)",
+                mac,
+                "never answered" if silence is None else f"{silence:.0f}s",
+            )
 
     async def _get_device_view_model(self, mac: MacAddress, update_state: bool = True) -> DeviceViewModel:
         """Get device status as dictionary for comparison"""
@@ -374,9 +461,16 @@ class GreeClimateManager:
 
         if update_state:
             try:
-                await device.update_state()
+                answered = await device.refresh_state(self.args.response_timeout)
             except (DeviceNotBoundError, DeviceTimeoutError) as e:
                 logger.error("Failed to update device %s: %s", mac, e)
+                self._record_response(mac, False)
+                return self.view_models.get(mac, view_model)
+
+            self._record_response(mac, answered)
+            if not answered:
+                # Nothing new arrived, so keep reporting the last known state
+                # rather than republishing a stale read as if it were fresh.
                 return self.view_models.get(mac, view_model)
 
         view_model.mac = normalize_mac(device.device_info.mac)
@@ -620,6 +714,9 @@ def get_cli_args() -> argparse.Namespace:
     parser.add_argument("--port", help="Port to run the server on", type=int, default=8123)
     parser.add_argument("--discovery_timeout", help="Discovery timeout in seconds", type=int, default=3)
     parser.add_argument("--polling_interval", help="Polling interval in seconds", type=int, default=2)
+    parser.add_argument(
+        "--response_timeout", help="How long to wait for a device to answer, in seconds", type=float, default=5.0
+    )
     parser.add_argument("--verbose", help="Enable verbose logging", action="store_true", default=False)
 
     args = parser.parse_args()

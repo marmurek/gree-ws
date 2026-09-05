@@ -4,30 +4,10 @@ import asyncio
 
 import pytest
 
-from conftest import MAC, mock_state
+from conftest import MAC, mock_state, run_polling_briefly
 
 # The polling loop and the view builder are internal; these tests drive them directly.
 # pylint: disable=protected-access
-
-
-async def run_polling_briefly(manager, seconds: float = 2.0) -> list:
-    """Run the polling loop for a moment and return everything it broadcast"""
-    broadcasts: list = []
-
-    async def capture(data):
-        broadcasts.append(data)
-
-    manager.connection_manager.broadcast = capture
-
-    task = asyncio.create_task(manager._poll_device_state(MAC))
-    await asyncio.sleep(seconds)
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
-
-    return broadcasts
 
 
 @pytest.mark.asyncio

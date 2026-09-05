@@ -14,6 +14,10 @@ if [ -z "$POLLING_INTERVAL" ]; then
   POLLING_INTERVAL=2
 fi
 
+if [ -z "$RESPONSE_TIMEOUT" ]; then
+  RESPONSE_TIMEOUT=5
+fi
+
 if [ -z "$VERBOSE" ]; then
   VERBOSE=""
 else
@@ -28,4 +32,5 @@ python3 main.py \
   --port ${PORT} \
   --discovery_timeout ${DISCOVERY_TIMEOUT} \
   --polling_interval ${POLLING_INTERVAL} \
+  --response_timeout ${RESPONSE_TIMEOUT} \
   ${VERBOSE}

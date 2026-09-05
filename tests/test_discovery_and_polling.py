@@ -9,22 +9,10 @@ from conftest import FAKE_KEY, MAC, FakeDevice, device_info, mock_state
 
 
 @pytest.fixture(name="discovered")
-def discovered_fixture(cli_args, monkeypatch):
+def discovered_fixture(cli_args, discovery):
     """A manager wired to discover exactly one fake device"""
-    climate_manager = main.GreeClimateManager(cli_args)
-    created: list[FakeDevice] = []
-
-    def build(info, *args, **kwargs):
-        unit = FakeDevice(info, *args, **kwargs)
-        created.append(unit)
-        return unit
-
-    async def scan(_self, wait_for=0, bcast_ifaces=None):  # pylint: disable=unused-argument
-        return [device_info()]
-
-    monkeypatch.setattr(main, "Device", build)
-    monkeypatch.setattr("greeclimate.discovery.Discovery.scan", scan)
-    return climate_manager, created
+    created = discovery([device_info()])
+    return main.GreeClimateManager(cli_args), created
 
 
 @pytest.mark.asyncio
@@ -66,20 +54,16 @@ async def test_polling_broadcasts_state_changes(discovered):
 
 
 @pytest.mark.asyncio
-async def test_a_device_that_fails_to_bind_is_skipped(cli_args, monkeypatch):
+async def test_a_device_that_fails_to_bind_is_skipped(cli_args, discovery):
     """Discovery survives a unit that cannot be bound"""
 
-    def build(info, *args, **kwargs):
+    def never_answers(info, *args, **kwargs):
         kwargs["bind_timeout"] = 0.2  # do not wait out the real timeout twice
         unit = FakeDevice(info, *args, **kwargs)
-        unit.alive = False  # never answers the bind
+        unit.alive = False
         return unit
 
-    async def scan(_self, wait_for=0, bcast_ifaces=None):  # pylint: disable=unused-argument
-        return [device_info()]
-
-    monkeypatch.setattr(main, "Device", build)
-    monkeypatch.setattr("greeclimate.discovery.Discovery.scan", scan)
+    discovery([device_info()], factory=never_answers)
 
     climate_manager = main.GreeClimateManager(cli_args)
     macs = await climate_manager.discover_devices()
@@ -101,22 +85,14 @@ async def test_stop_polling_cancels_every_task(discovered):
 
 
 @pytest.mark.asyncio
-async def test_a_discovered_mac_is_keyed_the_way_it_is_reported(cli_args, monkeypatch):
+async def test_a_discovered_mac_is_keyed_the_way_it_is_reported(cli_args, discovery):
     """The manager key and the reported mac must be the same string.
 
     Regression test: the key used the raw value from the device while the view
     stripped the separators, so a unit reporting a formatted MAC would be listed
     under an address that no endpoint could then be called with.
     """
-
-    def build(info, *args, **kwargs):
-        return FakeDevice(info, *args, **kwargs)
-
-    async def scan(_self, wait_for=0, bcast_ifaces=None):  # pylint: disable=unused-argument
-        return [device_info(mac="AA:BB:CC:00:11:22")]
-
-    monkeypatch.setattr(main, "Device", build)
-    monkeypatch.setattr("greeclimate.discovery.Discovery.scan", scan)
+    discovery([device_info(mac="AA:BB:CC:00:11:22")])
 
     climate_manager = main.GreeClimateManager(cli_args)
     macs = await climate_manager.discover_devices()

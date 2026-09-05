@@ -24,6 +24,7 @@ EXPOSE 8123
 #other envs
 ENV DISCOVERY_TIMEOUT=3
 ENV POLLING_INTERVAL=2
+ENV RESPONSE_TIMEOUT=5
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
