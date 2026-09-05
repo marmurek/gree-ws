@@ -1,4 +1,3 @@
-
 # Gree Climate WebSocket + REST API
 
 Advanced REST and WebSocket API for controlling Gree air conditioners with real-time state monitoring.
@@ -75,20 +74,42 @@ ws.send(JSON.stringify({
 You can update single or multiple parameters at once. The `mac` field is the device's MAC address, and the `data` field contains the parameters to update.
 If the command had an effect, you will soon receive a `report` message; otherwise, you will receive a `not_changed` message.
 
-#### 7. Errors
+If the request carries a `message_id`, the same value is echoed back on the `not_changed` and `error` replies, so a client can match a response to its request. `report` messages are broadcast to every client and carry no `message_id`.
+
+#### 4. No change
+Sent when the command did not change anything on the device.
+```json
+{
+  "type": "not_changed",
+  "mac": "aabbccddeeff",
+  "message_id": "abc-123",
+  "message": "No changes made to the device by last command"
+}
+```
+
+#### 5. Errors
 ```json
 {
   "type": "error",
+  "message_id": "abc-123",
   "message": "Device not found"
 }
 ```
+The `message_id` field is absent when the request could not be parsed as JSON.
+
+## 🌡️ Device fields worth knowing
+
+Full schemas are in [/docs](http://localhost:8123/docs); these two do not behave the way the names suggest.
+
+- **`buzzer`** - whether the unit beeps when it receives a command. It is not stored on the air conditioner: it lives in the application's memory, defaults to enabled and goes back to enabled after a restart or a `POST /discover`. Send `"buzzer": false` to silence the unit.
+- **`target_humidity`** - the device encodes it as `(value - 15) / 5`, so only multiples of 5 in the 30-80 range are accepted; anything else is rejected with `422`. Units without a dehumidifier report no usable value and are reported as `null`.
 
 ## 🛠️ Build and run in docker
 
 ### Build the Docker image
 ```bash
 docker build -t gree-ws .
-``` 
+```
 
 
 ### Run the Docker container (network mode: host required)
@@ -117,7 +138,6 @@ docker run -it --name gree-ws --rm --network host -e DISCOVERY_TIMEOUT=5 -e POLL
 ### Run with Docker Compose
 You can also use Docker Compose to run the application. Create a `docker-compose.yml` file with the following content:
 ```yaml
-version: '3.8'
 services:
   gree-ws:
     build: .
@@ -127,6 +147,27 @@ services:
       - DISCOVERY_TIMEOUT=5
       - POLLING_INTERVAL=1
 ```
+
+## 🧑‍💻 Development
+
+Run the application outside Docker:
+
+```bash
+bash ./boot_python.sh
+source .venv/bin/activate
+python3 main.py --dev_mode --verbose
+```
+
+The code is checked with black, mypy and pylint. All three read their settings from `pyproject.toml`:
+
+```bash
+pip install -r requirements-dev.txt
+black .
+mypy
+pylint main.py
+```
+
+`mypy` follows the `greeclimate` sources even though the library ships no `py.typed` marker - that is what makes it able to report a mistyped device property instead of letting it fail silently at runtime.
 
 ## 🤝 Collaboration
 

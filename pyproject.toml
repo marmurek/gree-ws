@@ -80,4 +80,9 @@ disable = [
     "missing-module-docstring",
     # Pydantic models and enums are self-describing.
     "too-few-public-methods",
+    # Deliberate throughout: every `except Exception` in main.py is an
+    # isolation boundary around one device or one client. The service logs and
+    # keeps running instead of letting a single misbehaving unit or WebSocket
+    # take the whole API down. Drop this entry if that stops being the rule.
+    "broad-exception-caught",
 ]

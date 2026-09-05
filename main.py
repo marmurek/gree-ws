@@ -16,19 +16,22 @@ from greeclimate.discovery import Discovery
 from greeclimate.device import Device, HorizontalSwing, VerticalSwing, Mode, FanSpeed, HUMIDITY_MIN, HUMIDITY_MAX
 from greeclimate.exceptions import DeviceNotBoundError, DeviceTimeoutError
 
+
 def pascal_to_snake(name):
     """
     Converts PascalCase to snake_case.
     Example: PascalCase -> pascal_case
     """
-    return re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
 
 def snake_to_pascal(name):
     """
     Converts snake_case to PascalCase.
     Example: snake_case -> SnakeCase
     """
-    return ''.join(word.capitalize() for word in name.split('_'))
+    return "".join(word.capitalize() for word in name.split("_"))
+
 
 def to_device_enum(enum_value, device_enum_cls):
     """
@@ -41,6 +44,7 @@ def to_device_enum(enum_value, device_enum_cls):
 
     return val
 
+
 def from_device_enum(device_enum_value, target_enum_cls):
     """
     Converts a DeviceEnum (e.g., DeviceMode) to an enum (e.g., Mode) based on its PascalCase name.
@@ -52,6 +56,7 @@ def from_device_enum(device_enum_value, target_enum_cls):
 
     return val
 
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -60,18 +65,29 @@ logger = logging.getLogger(__name__)
 HUMIDITY_STEP = 5
 
 # Pydantic models for API
-type MacAddress = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{12}$"),]
-type IpAddress = Annotated[str, StringConstraints(pattern=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"),]
+type MacAddress = Annotated[
+    str,
+    StringConstraints(pattern=r"^[0-9a-f]{12}$"),
+]
+type IpAddress = Annotated[
+    str,
+    StringConstraints(pattern=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"),
+]
+
+
 class DeviceMode(Enum):
     """Device operating modes"""
+
     auto = "auto"
     cool = "cool"
     dry = "dry"
     fan = "fan"
     heat = "heat"
 
+
 class DeviceFanSpeed(Enum):
     """Device fan speed settings"""
+
     auto = "auto"
     low = "low"
     medium_low = "medium_low"
@@ -79,8 +95,10 @@ class DeviceFanSpeed(Enum):
     medium_high = "medium_high"
     high = "high"
 
+
 class DeviceHorizontalSwing(Enum):
     """Device horizontal swing settings"""
+
     default = "default"
     full_swing = "full_swing"
     left = "left"
@@ -89,8 +107,10 @@ class DeviceHorizontalSwing(Enum):
     right_center = "right_center"
     right = "right"
 
+
 class DeviceVerticalSwing(Enum):
     """Device vertical swing settings"""
+
     default = "default"
     full_swing = "full_swing"
     fixed_upper = "fixed_upper"
@@ -104,8 +124,10 @@ class DeviceVerticalSwing(Enum):
     swing_lower_middle = "swing_lower_middle"
     swing_lower = "swing_lower"
 
+
 class DeviceViewModel(BaseModel):
     """Device view model for API responses"""
+
     mac: MacAddress = Field("000000000000", description="MAC address of the device")
     ip: IpAddress = Field("0.0.0.0", description="IP address of the device")
     power: bool = Field(False, description="Power state of the device")
@@ -115,11 +137,15 @@ class DeviceViewModel(BaseModel):
     current_humidity: Optional[int] = Field(None, description="Current humidity reported by the device")
     target_humidity: Optional[int] = Field(
         None,
-        description=f"Target humidity set on the device ({HUMIDITY_MIN}-{HUMIDITY_MAX}, step {HUMIDITY_STEP}), null when the device does not report a settable value"
+        description=f"Target humidity set on the device ({HUMIDITY_MIN}-{HUMIDITY_MAX}, step {HUMIDITY_STEP}), null when the device does not report a settable value",
     )
     fan_speed: DeviceFanSpeed = Field(DeviceFanSpeed.auto, description="Fan speed setting of the device")
-    horizontal_swing: DeviceHorizontalSwing = Field(DeviceHorizontalSwing.default, description="Horizontal swing setting of the device")
-    vertical_swing: DeviceVerticalSwing = Field(DeviceVerticalSwing.default, description="Vertical swing setting of the device")
+    horizontal_swing: DeviceHorizontalSwing = Field(
+        DeviceHorizontalSwing.default, description="Horizontal swing setting of the device"
+    )
+    vertical_swing: DeviceVerticalSwing = Field(
+        DeviceVerticalSwing.default, description="Vertical swing setting of the device"
+    )
     turbo: Optional[bool] = Field(None, description="Turbo mode state")
     quiet: Optional[bool] = Field(None, description="Quiet mode state")
     light: Optional[bool] = Field(None, description="Light or backlight state")
@@ -128,21 +154,21 @@ class DeviceViewModel(BaseModel):
     anion: Optional[bool] = Field(None, description="Anion mode state")
     sleep: Optional[bool] = Field(None, description="Sleep mode state")
     power_save: Optional[bool] = Field(None, description="Power save mode state")
-    buzzer: Optional[bool] = Field(None, description="Buzzer state, when disabled the unit does not beep on each command")
+    buzzer: Optional[bool] = Field(
+        None, description="Buzzer state, when disabled the unit does not beep on each command"
+    )
     clean_filter: Optional[bool] = Field(None, description="Clean filter indicator state")
     water_full: Optional[bool] = Field(None, description="Water full indicator state")
     steady_heat: Optional[bool] = Field(None, description="Steady heat mode state")
 
+
 class DeviceUpdateModel(BaseModel):
     """Device update model for API requests"""
+
     power: Optional[bool] = Field(None, description="Power state of the device to set")
     mode: Optional[DeviceMode] = Field(None, description="Operating mode of the device to set")
     target_temperature: Optional[int] = Field(
-        None,
-        ge=16,
-        le=30,
-        description="Target temperature (16-30, step 1) to set",
-        json_schema_extra={"step": 1}
+        None, ge=16, le=30, description="Target temperature (16-30, step 1) to set", json_schema_extra={"step": 1}
     )
     target_humidity: Optional[int] = Field(
         None,
@@ -150,10 +176,12 @@ class DeviceUpdateModel(BaseModel):
         le=HUMIDITY_MAX,
         multiple_of=HUMIDITY_STEP,
         description=f"Target humidity ({HUMIDITY_MIN}-{HUMIDITY_MAX}, step {HUMIDITY_STEP}) to set",
-        json_schema_extra={"step": HUMIDITY_STEP}
+        json_schema_extra={"step": HUMIDITY_STEP},
     )
     fan_speed: Optional[DeviceFanSpeed] = Field(None, description="Fan speed setting of the device to set")
-    horizontal_swing: Optional[DeviceHorizontalSwing] = Field(None, description="Horizontal swing setting of the device to set")
+    horizontal_swing: Optional[DeviceHorizontalSwing] = Field(
+        None, description="Horizontal swing setting of the device to set"
+    )
     vertical_swing: Optional[DeviceVerticalSwing] = None
     turbo: Optional[bool] = None
     quiet: Optional[bool] = None
@@ -163,33 +191,42 @@ class DeviceUpdateModel(BaseModel):
     anion: Optional[bool] = None
     sleep: Optional[bool] = None
     power_save: Optional[bool] = None
-    buzzer: Optional[bool] = Field(None, description="Buzzer state to set, set to false to silence the beep on each command")
+    buzzer: Optional[bool] = Field(
+        None, description="Buzzer state to set, set to false to silence the beep on each command"
+    )
     steady_heat: Optional[bool] = None
+
 
 class RootResponse(BaseModel):
     """Root endpoint response model"""
+
     app: str
     version: str
     devices: List[MacAddress]
 
+
 class ConnectionManager:
     """Manages WebSocket connections and broadcasting messages to clients"""
+
     def __init__(self, args: argparse.Namespace):
         self.active_connections: Set[WebSocket] = set()
         self.lock = Lock()
         self.args = args
 
     async def connect(self, websocket: WebSocket):
+        """Accept a WebSocket connection and start tracking it"""
         await websocket.accept()
         with self.lock:
             self.active_connections.add(websocket)
 
     def disconnect(self, websocket: WebSocket):
+        """Stop tracking a WebSocket connection"""
         with self.lock:
             if websocket in self.active_connections:
                 self.active_connections.remove(websocket)
 
     async def broadcast(self, data: dict):
+        """Send data to every connected client, dropping the ones that went away"""
         disconnected = set()
         with self.lock:
             for connection in self.active_connections:
@@ -205,36 +242,39 @@ class ConnectionManager:
             for conn in disconnected:
                 self.active_connections.discard(conn)
 
+
 def create_view_model() -> DeviceViewModel:
     """Create a default DeviceViewModel instance"""
     return DeviceViewModel(
-            mac="000000000000",
-            ip="0.0.0.0",
-            power=False,
-            mode=DeviceMode.auto,
-            current_temperature=None,
-            target_temperature=16,
-            current_humidity=None,
-            target_humidity=None,
-            fan_speed=DeviceFanSpeed.auto,
-            horizontal_swing=DeviceHorizontalSwing.default,
-            vertical_swing=DeviceVerticalSwing.default,
-            turbo=None,
-            quiet=None,
-            light=None,
-            fresh_air=None,
-            xfan=None,
-            anion=None,
-            sleep=None,
-            power_save=None,
-            buzzer=None,
-            clean_filter=None,
-            water_full=None,
-            steady_heat=None,
-        )
+        mac="000000000000",
+        ip="0.0.0.0",
+        power=False,
+        mode=DeviceMode.auto,
+        current_temperature=None,
+        target_temperature=16,
+        current_humidity=None,
+        target_humidity=None,
+        fan_speed=DeviceFanSpeed.auto,
+        horizontal_swing=DeviceHorizontalSwing.default,
+        vertical_swing=DeviceVerticalSwing.default,
+        turbo=None,
+        quiet=None,
+        light=None,
+        fresh_air=None,
+        xfan=None,
+        anion=None,
+        sleep=None,
+        power_save=None,
+        buzzer=None,
+        clean_filter=None,
+        water_full=None,
+        steady_heat=None,
+    )
+
 
 class GreeClimateManager:
     """Manages Gree devices, discovery, polling, and state updates"""
+
     def __init__(self, args: argparse.Namespace):
         self.args = args
         self.devices: Dict[MacAddress, Device] = {}
@@ -333,32 +373,34 @@ class GreeClimateManager:
         if device.fan_speed is not None:
             view_model.fan_speed = to_device_enum(FanSpeed(device.fan_speed), DeviceFanSpeed)
         if device.horizontal_swing is not None:
-            view_model.horizontal_swing = to_device_enum(HorizontalSwing(device.horizontal_swing), DeviceHorizontalSwing)
+            view_model.horizontal_swing = to_device_enum(
+                HorizontalSwing(device.horizontal_swing), DeviceHorizontalSwing
+            )
         if device.vertical_swing is not None:
             view_model.vertical_swing = to_device_enum(VerticalSwing(device.vertical_swing), DeviceVerticalSwing)
-        if hasattr(device, 'turbo'):
+        if hasattr(device, "turbo"):
             view_model.turbo = bool(device.turbo)
-        if hasattr(device, 'quiet'):
+        if hasattr(device, "quiet"):
             view_model.quiet = bool(device.quiet)
-        if hasattr(device, 'light'):
+        if hasattr(device, "light"):
             view_model.light = bool(device.light)
-        if hasattr(device, 'fresh_air'):
+        if hasattr(device, "fresh_air"):
             view_model.fresh_air = bool(device.fresh_air)
-        if hasattr(device, 'xfan'):
+        if hasattr(device, "xfan"):
             view_model.xfan = bool(device.xfan)
-        if hasattr(device, 'anion'):
+        if hasattr(device, "anion"):
             view_model.anion = bool(device.anion)
-        if hasattr(device, 'sleep'):
+        if hasattr(device, "sleep"):
             view_model.sleep = bool(device.sleep)
-        if hasattr(device, 'power_save'):
+        if hasattr(device, "power_save"):
             view_model.power_save = bool(device.power_save)
-        if hasattr(device, 'buzzer'):
+        if hasattr(device, "buzzer"):
             view_model.buzzer = bool(device.buzzer)
-        if hasattr(device, 'clean_filter'):
+        if hasattr(device, "clean_filter"):
             view_model.clean_filter = bool(device.clean_filter)
-        if hasattr(device, 'water_full'):
+        if hasattr(device, "water_full"):
             view_model.water_full = bool(device.water_full)
-        if hasattr(device, 'steady_heat'):
+        if hasattr(device, "steady_heat"):
             view_model.steady_heat = bool(device.steady_heat)
 
         return view_model
@@ -411,23 +453,16 @@ class GreeClimateManager:
                             for key in keys_to_remove:
                                 del changes[key]
 
-
                 if changes:
                     self.view_models[mac] = current_state
 
-                    #if changes contain current_temperature or current_humidity, update last measurement time
+                    # if changes contain current_temperature or current_humidity, update last measurement time
                     if "current_temperature" in changes or "current_humidity" in changes:
                         self.measurement_timestamps[mac] = asyncio.get_event_loop().time()
 
                     logger.info("State change detected for device %s: %s", mac, changes)
                     try:
-                        await self.connection_manager.broadcast(
-                            {
-                                "type": "report",
-                                "mac": mac,
-                                "data": changes
-                            }
-                        )
+                        await self.connection_manager.broadcast({"type": "report", "mac": mac, "data": changes})
                     except Exception as e:
                         logger.error("Failed to send state change notification for %s: %s", mac, e)
 
@@ -442,7 +477,7 @@ class GreeClimateManager:
 
     async def stop_polling(self):
         """Stop all polling tasks"""
-        for mac, task in self.polling_tasks.items():
+        for task in self.polling_tasks.values():
             task.cancel()
         self.polling_tasks.clear()
 
@@ -538,11 +573,15 @@ class GreeClimateManager:
 
         return modified
 
+
 def get_cli_args() -> argparse.Namespace:
+    """Parse the command line arguments"""
     parser = argparse.ArgumentParser(add_help=False)
     parser.description = "Gree Climate API - REST and WebSocket API for controlling Gree air conditioners"
 
-    parser.add_argument("--dev_mode", help="Enable development mode with auto-reload", action="store_true", default=False)
+    parser.add_argument(
+        "--dev_mode", help="Enable development mode with auto-reload", action="store_true", default=False
+    )
     parser.add_argument("--port", help="Port to run the server on", type=int, default=8123)
     parser.add_argument("--discovery_timeout", help="Discovery timeout in seconds", type=int, default=3)
     parser.add_argument("--polling_interval", help="Polling interval in seconds", type=int, default=2)
@@ -552,15 +591,17 @@ def get_cli_args() -> argparse.Namespace:
 
     return args
 
+
 cli_args = get_cli_args()
 
-logging.getLogger().setLevel(logging.DEBUG if cli_args.verbose else logging.INFO )
-logging.getLogger("greeclimate").setLevel(logging.DEBUG if cli_args.verbose else logging.WARNING )
+logging.getLogger().setLevel(logging.DEBUG if cli_args.verbose else logging.INFO)
+logging.getLogger("greeclimate").setLevel(logging.DEBUG if cli_args.verbose else logging.WARNING)
 
 climate_manager = GreeClimateManager(cli_args)
 
+
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     """Lifespan context manager for startup and shutdown tasks"""
     # Startup
     logger.info("Starting Gree Climate API...")
@@ -570,15 +611,22 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Gree Climate API...")
     await climate_manager.stop_polling()
 
+
 # FastAPI app
 app = FastAPI(
     title="Gree Climate API",
     description="REST and WebSocket API for controlling Gree air conditioners with real-time state monitoring",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
-@app.get("/", response_model=RootResponse, summary="API info", description="Basic API info and list of discovered device MAC addresses.")
+
+@app.get(
+    "/",
+    response_model=RootResponse,
+    summary="API info",
+    description="Basic API info and list of discovered device MAC addresses.",
+)
 async def root():
     """Root endpoint providing API info and list of devices"""
     return RootResponse(
@@ -587,12 +635,24 @@ async def root():
         devices=list(climate_manager.view_models.keys()),
     )
 
-@app.get("/devices", response_model=List[DeviceViewModel], summary="List devices", description="List all discovered Gree devices with their current state.")
+
+@app.get(
+    "/devices",
+    response_model=List[DeviceViewModel],
+    summary="List devices",
+    description="List all discovered Gree devices with their current state.",
+)
 async def list_devices():
     """List all discovered device view models"""
     return list(climate_manager.view_models.values())
 
-@app.get("/devices/{mac}", response_model=DeviceViewModel, summary="Get device view", description="Get detailed view of a specific Gree device by its MAC address.")
+
+@app.get(
+    "/devices/{mac}",
+    response_model=DeviceViewModel,
+    summary="Get device view",
+    description="Get detailed view of a specific Gree device by its MAC address.",
+)
 async def get_device_view(mac: MacAddress):
     """Get device view"""
 
@@ -600,6 +660,7 @@ async def get_device_view(mac: MacAddress):
         raise HTTPException(status_code=404, detail="Device not found")
 
     return climate_manager.view_models[mac]
+
 
 @app.patch(
     "/devices/{mac}",
@@ -626,19 +687,19 @@ async def send_device_update(mac: MacAddress, data: DeviceUpdateModel):
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+
 # W endpointzie:
 @app.post(
     "/discover",
     response_model=List[MacAddress],
-    responses={
-        200: {"description": "List of MAC addresses of discovered devices."}
-    },
+    responses={200: {"description": "List of MAC addresses of discovered devices."}},
     summary="Rediscover devices",
     description="Rediscover devices and return their MAC addresses. This will stop any ongoing polling and start a new discovery process. Useful for refreshing the device list.",
 )
 async def rediscover_devices():
     """Rediscover devices and return their MAC addresses"""
     return await climate_manager.discover_devices()
+
 
 # WebSocket endpoint
 @app.websocket("/ws")
@@ -648,10 +709,14 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         # Send initial status
-        await websocket.send_text(json.dumps({
-            "type": "list",
-            "data": [v.model_dump(by_alias=True, mode='json') for v in climate_manager.view_models.values()]
-        }))
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "list",
+                    "data": [v.model_dump(by_alias=True, mode="json") for v in climate_manager.view_models.values()],
+                }
+            )
+        )
 
         while True:
             # Listen for incoming messages (commands from client)
@@ -661,10 +726,7 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 message = json.loads(data)
             except json.JSONDecodeError:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "message": "Invalid JSON format"
-                }))
+                await websocket.send_text(json.dumps({"type": "error", "message": "Invalid JSON format"}))
                 continue
 
             message_id = message.get("message_id")
@@ -673,11 +735,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 if message.get("type") == "update":
                     mac = message.get("mac")
                     if not mac or mac not in climate_manager.view_models:
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "message_id": message_id,
-                            "message": "Invalid or missing MAC address"
-                        }))
+                        await websocket.send_text(
+                            json.dumps(
+                                {"type": "error", "message_id": message_id, "message": "Invalid or missing MAC address"}
+                            )
+                        )
                         continue
 
                     command = DeviceUpdateModel(**message.get("data", {}))
@@ -685,21 +747,22 @@ async def websocket_endpoint(websocket: WebSocket):
                     modified = await climate_manager.send_update(mac, command)
 
                     if not modified:
-                        await websocket.send_text(json.dumps({
-                            "type": "not_changed",
-                            "mac": mac,
-                            "message_id": message_id,
-                            "message": "No changes made to the device by last command"
-                        }))
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "type": "not_changed",
+                                    "mac": mac,
+                                    "message_id": message_id,
+                                    "message": "No changes made to the device by last command",
+                                }
+                            )
+                        )
             except Exception as e:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "message_id": message_id,
-                    "message": str(e)
-                }))
+                await websocket.send_text(json.dumps({"type": "error", "message_id": message_id, "message": str(e)}))
 
     except WebSocketDisconnect:
         climate_manager.connection_manager.disconnect(websocket)
+
 
 if __name__ == "__main__":
     uvicorn.run(
@@ -707,6 +770,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=cli_args.port,
         reload=cli_args.dev_mode,
-        log_level= "debug" if cli_args.verbose else "info",
-        access_log=cli_args.verbose
+        log_level="debug" if cli_args.verbose else "info",
+        access_log=cli_args.verbose,
     )
