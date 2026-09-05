@@ -2,6 +2,7 @@
 
 import pydantic
 import pytest
+from fastapi import HTTPException
 
 from conftest import MAC
 from main import DeviceFanSpeed, DeviceMode, DeviceUpdateModel, DeviceVerticalSwing, HUMIDITY_MAX, HUMIDITY_MIN
@@ -89,3 +90,39 @@ def test_target_temperature_out_of_range_is_rejected(value):
     """The temperature range is enforced by the model"""
     with pytest.raises(pydantic.ValidationError):
         DeviceUpdateModel(target_temperature=value)
+
+
+@pytest.mark.asyncio
+async def test_setting_quiet_to_its_current_value_is_not_a_change(manager, device):
+    """The device stores quiet as 2 or 0, so it must be compared as a boolean.
+
+    Regression test: comparing the raw int against a bool made every quiet
+    request look like a change.
+    """
+    device.quiet = True
+    device._dirty.clear()  # pylint: disable=protected-access
+
+    modified = await manager.send_update(MAC, DeviceUpdateModel(quiet=True))
+
+    assert modified is False
+
+
+@pytest.mark.asyncio
+async def test_toggling_quiet_is_a_change(manager, device):
+    """Actually flipping quiet is still reported as a change"""
+    device.quiet = True
+    device._dirty.clear()  # pylint: disable=protected-access
+
+    modified = await manager.send_update(MAC, DeviceUpdateModel(quiet=False))
+
+    assert modified is True
+    assert device.last_command()["Quiet"] == 0
+
+
+@pytest.mark.asyncio
+async def test_updating_an_unknown_device_is_reported_as_not_found(manager):
+    """A MAC the manager does not hold must not raise a bare KeyError"""
+    with pytest.raises(HTTPException) as raised:
+        await manager.send_update("ffffffffffff", DeviceUpdateModel(power=True))
+
+    assert raised.value.status_code == 404

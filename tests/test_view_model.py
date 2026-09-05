@@ -3,9 +3,10 @@
 # The view model builder is internal on purpose; these tests exercise it directly.
 # pylint: disable=protected-access
 
+import pydantic
 import pytest
 
-from conftest import MAC, mock_state
+from conftest import MAC, device_info, mock_state
 from main import DeviceFanSpeed, DeviceMode, DeviceVerticalSwing
 
 
@@ -89,3 +90,31 @@ async def test_swing_and_mode_enums_round_trip(manager, device):
     assert view.mode is DeviceMode.cool
     assert view.vertical_swing is DeviceVerticalSwing.fixed_middle
     assert view.fan_speed is DeviceFanSpeed.high
+
+
+@pytest.mark.asyncio
+async def test_a_mac_with_separators_is_normalised(manager, device):
+    """However the unit spells its MAC, the API reports bare lower case hex"""
+    device.device_info = device_info(mac="AA:BB:CC:00:11:22")
+
+    view = await manager._get_device_view_model(MAC, update_state=False)
+
+    assert view.mac == "aabbcc001122"
+
+
+def test_the_view_model_validates_what_is_assigned_to_it():
+    """Building the view field by field must not bypass the declared types.
+
+    Regression test: without validate_assignment the model accepted anything,
+    which is how an unsettable target_humidity used to reach the API.
+    """
+    from main import create_view_model  # pylint: disable=import-outside-toplevel
+
+    view = create_view_model()
+
+    with pytest.raises(pydantic.ValidationError):
+        view.mac = "NOT-A-MAC"
+    with pytest.raises(pydantic.ValidationError):
+        view.ip = "definitely.not.an.ip"
+    with pytest.raises(pydantic.ValidationError):
+        view.current_temperature = "hot"  # type: ignore[assignment]  # deliberately wrong

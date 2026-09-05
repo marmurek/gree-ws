@@ -8,7 +8,7 @@ from enum import Enum
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, status
-from pydantic import BaseModel, StringConstraints, Field
+from pydantic import BaseModel, ConfigDict, StringConstraints, Field
 import uvicorn
 
 from greeclimate.discovery import Discovery
@@ -36,28 +36,42 @@ def to_device_enum(enum_value, device_enum_cls):
     """
     Converts an enum (e.g., Mode) to a DeviceEnum (e.g., DeviceMode) based on its name in snake_case.
     Example: to_device_enum(Mode.Cool, DeviceMode) -> DeviceMode.cool
-    """
-    val = device_enum_cls[pascal_to_snake(enum_value.name)]
-    if val is None:
-        return list(device_enum_cls)[0]
 
-    return val
+    A value the API does not know falls back to the first member: reporting an
+    approximate state is better than letting the polling loop die on it.
+    """
+    try:
+        return device_enum_cls[pascal_to_snake(enum_value.name)]
+    except KeyError:
+        fallback = list(device_enum_cls)[0]
+        logger.warning(
+            "Device reported unknown %s value %s, reporting %s", device_enum_cls.__name__, enum_value, fallback
+        )
+        return fallback
 
 
 def from_device_enum(device_enum_value, target_enum_cls):
     """
     Converts a DeviceEnum (e.g., DeviceMode) to an enum (e.g., Mode) based on its PascalCase name.
     Example: from_device_enum(DeviceMode.cool, Mode) -> Mode.Cool
-    """
-    val = target_enum_cls[snake_to_pascal(device_enum_value.name)]
-    if val is None:
-        return list(target_enum_cls)[0]
 
-    return val
+    Returns None when the value has no counterpart, so the caller can reject the
+    request instead of quietly sending the device something else.
+    """
+    try:
+        return target_enum_cls[snake_to_pascal(device_enum_value.name)]
+    except KeyError:
+        return None
 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def normalize_mac(mac: str) -> str:
+    """Reduce a device MAC to the bare lower case hex the API uses as its key"""
+    return mac.replace(":", "").replace("-", "").lower()
+
 
 # The device stores the target humidity as (value - 15) / 5, so only multiples of 5
 # survive a write/read round trip. HUMIDITY_MIN/HUMIDITY_MAX come from greeclimate.
@@ -126,6 +140,10 @@ class DeviceVerticalSwing(Enum):
 
 class DeviceViewModel(BaseModel):
     """Device view model for API responses"""
+
+    # The model is built field by field from the device, so without this the
+    # declared types and patterns would never actually be checked.
+    model_config = ConfigDict(validate_assignment=True)
 
     mac: MacAddress = Field("000000000000", description="MAC address of the device")
     ip: IpAddress = Field("0.0.0.0", description="IP address of the device")
@@ -309,7 +327,7 @@ class GreeClimateManager:
 
                     await device.update_state()
 
-                    self.devices[device_info.mac] = device
+                    self.devices[normalize_mac(device_info.mac)] = device
                     logger.info("Device bound: %s at %s", device_info.name, device_info.ip)
 
                 except (DeviceNotBoundError, DeviceTimeoutError) as e:
@@ -361,7 +379,7 @@ class GreeClimateManager:
                 logger.error("Failed to update device %s: %s", mac, e)
                 return self.view_models.get(mac, view_model)
 
-        view_model.mac = device.device_info.mac.replace(":", "")
+        view_model.mac = normalize_mac(device.device_info.mac)
         view_model.ip = device.device_info.ip
 
         if device.power is not None:
@@ -433,8 +451,8 @@ class GreeClimateManager:
 
                 last_state = self.view_models.get(mac, create_view_model())
 
-                current = current_state.dict()
-                last = last_state.dict()
+                current = current_state.model_dump()
+                last = last_state.model_dump()
                 changes = {}
 
                 def convert_if_enum(val):
@@ -455,8 +473,12 @@ class GreeClimateManager:
                         last_measurement = self.measurement_timestamps.get(mac, 0)
                         if asyncio.get_event_loop().time() - last_measurement < 60:
                             keys_to_remove = []
-                            for key in changes:
-                                if abs(changes[key]["new"] - changes[key]["old"]) <= 1:
+                            for key, change in changes.items():
+                                # A sensor that starts or stops reporting is a real
+                                # change; subtracting None would raise here.
+                                if change["old"] is None or change["new"] is None:
+                                    continue
+                                if abs(change["new"] - change["old"]) <= 1:
                                     keys_to_remove.append(key)
                             for key in keys_to_remove:
                                 del changes[key]
@@ -492,7 +514,10 @@ class GreeClimateManager:
     async def send_update(self, mac: MacAddress, data: DeviceUpdateModel) -> bool:
         """Send update to device"""
 
-        device = self.devices[mac]
+        device = self.devices.get(mac)
+        if device is None:
+            raise HTTPException(status_code=404, detail="Device not found")
+
         modified = False
 
         if data.power is not None:
@@ -536,7 +561,9 @@ class GreeClimateManager:
             modified = device.turbo != data.turbo or modified
             device.turbo = data.turbo
         if data.quiet is not None:
-            modified = device.quiet != data.quiet or modified
+            # The device stores quiet as 2 or 0, so compare the same way the view
+            # model reports it, otherwise every request looks like a change.
+            modified = bool(device.quiet) != data.quiet or modified
             device.quiet = data.quiet
         if data.light is not None:
             modified = device.light != data.light or modified

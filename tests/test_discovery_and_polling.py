@@ -98,3 +98,30 @@ async def test_stop_polling_cancels_every_task(discovered):
     await climate_manager.stop_polling()
 
     assert not climate_manager.polling_tasks
+
+
+@pytest.mark.asyncio
+async def test_a_discovered_mac_is_keyed_the_way_it_is_reported(cli_args, monkeypatch):
+    """The manager key and the reported mac must be the same string.
+
+    Regression test: the key used the raw value from the device while the view
+    stripped the separators, so a unit reporting a formatted MAC would be listed
+    under an address that no endpoint could then be called with.
+    """
+
+    def build(info, *args, **kwargs):
+        return FakeDevice(info, *args, **kwargs)
+
+    async def scan(_self, wait_for=0, bcast_ifaces=None):  # pylint: disable=unused-argument
+        return [device_info(mac="AA:BB:CC:00:11:22")]
+
+    monkeypatch.setattr(main, "Device", build)
+    monkeypatch.setattr("greeclimate.discovery.Discovery.scan", scan)
+
+    climate_manager = main.GreeClimateManager(cli_args)
+    macs = await climate_manager.discover_devices()
+    await climate_manager.stop_polling()
+
+    assert macs == ["aabbcc001122"]
+    assert set(climate_manager.devices) == {"aabbcc001122"}
+    assert climate_manager.view_models["aabbcc001122"].mac == "aabbcc001122"
