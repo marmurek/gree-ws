@@ -17,6 +17,7 @@ RUN chmod +x entrypoint.sh
 
 COPY gree_ws/ gree_ws/
 COPY main.py .
+COPY config.yaml .
 
 # The application needs no privileges: it listens above 1024 and its UDP
 # broadcast only needs SO_BROADCAST, not a raw socket.
@@ -27,14 +28,15 @@ USER gree
 ENV PORT=8123
 EXPOSE 8123
 
-#other envs
-ENV DISCOVERY_TIMEOUT=3
-ENV POLLING_INTERVAL=2
-ENV RESPONSE_TIMEOUT=5
+# Defaults live in config.yaml. These environment variables override it, and
+# are the way to configure the container without rebuilding or mounting a file.
+#   DISCOVERY_TIMEOUT  POLLING_INTERVAL  RESPONSE_TIMEOUT  VERBOSE
+#   AUTH_ENABLED  AUTH_TOKEN  CONFIG_FILE
 
 # Health check
+# /health stays reachable without a token, so the probe works with auth enabled.
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8123}/ || exit 1
+    CMD curl -f http://localhost:${PORT:-8123}/health || exit 1
 
 # Run the application
 ENTRYPOINT ["./entrypoint.sh"]

@@ -1,0 +1,42 @@
+# Gree Climate API configuration.
+#
+# Every setting lives here. Each one can also be overridden by an environment
+# variable, which is what the Docker image uses - see the README for the list.
+# Point the application at a different file with:  python3 main.py --config other.yaml
+
+server:
+  # Port the HTTP and WebSocket API listens on.
+  port: 8123
+  # Reload the application when the sources change. For development only.
+  dev_mode: false
+
+discovery:
+  # How long to wait for units to answer the discovery broadcast, in seconds.
+  timeout: 3
+
+polling:
+  # How often to ask each unit for its state, in seconds.
+  interval: 2
+  # How long to wait for a unit to answer, in seconds. Also caps the binding
+  # handshake: greeclimate tries one cipher, waits, then tries the other, so a
+  # long value here makes startup slow when a newer unit is present.
+  response_timeout: 5
+
+logging:
+  # Log every packet exchanged with the units. Very noisy.
+  verbose: false
+
+auth:
+  # When disabled, every endpoint is open to anyone who can reach the port.
+  # The application binds to all interfaces, so on a home network that means
+  # every device on the LAN can control the air conditioners.
+  enabled: false
+  # The shared token clients must present. Required when auth is enabled.
+  #
+  #   REST:      Authorization: Bearer <token>   (or  X-API-Key: <token>)
+  #   WebSocket: ws://host:8123/ws?token=<token>
+  #
+  # Browsers cannot set headers on a WebSocket, hence the query parameter. Note
+  # that query strings end up in proxy and access logs; prefer the header where
+  # the client allows it.
+  token: ""

@@ -11,7 +11,7 @@ from gree_ws import api, models
 def client_fixture(manager, monkeypatch):
     """A test client over an app whose manager holds one fake device"""
     monkeypatch.setattr(api, "GreeClimateManager", lambda _args: manager)
-    app = api.create_app(manager.args)
+    app = api.create_app(manager.settings)
     # Startup would try to discover real devices; the manager is already loaded.
     monkeypatch.setattr(app.router, "lifespan_context", _no_lifespan)
     return TestClient(app)

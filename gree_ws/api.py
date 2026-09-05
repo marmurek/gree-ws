@@ -1,6 +1,5 @@
 """The HTTP and WebSocket surface."""
 
-import argparse
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -9,7 +8,8 @@ from typing import List
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse
 
-from gree_ws import VERSION
+from gree_ws import VERSION, auth as auth_module
+from gree_ws.config import Settings
 from gree_ws.errors import DeviceNotFound, DeviceUnavailable, GreeError, InvalidCommand
 from gree_ws.manager import GreeClimateManager
 from gree_ws.models import DeviceUpdateModel, DeviceViewModel, MacAddress, RootResponse
@@ -25,9 +25,9 @@ STATUS_FOR_ERROR = {
 }
 
 
-def create_app(args: argparse.Namespace) -> FastAPI:
-    """Build the application around a manager configured from `args`"""
-    climate_manager = GreeClimateManager(args)
+def create_app(settings: Settings) -> FastAPI:
+    """Build the application around a manager configured from `settings`"""
+    climate_manager = GreeClimateManager(settings)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -45,6 +45,16 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.climate_manager = climate_manager
+    auth_module.install(app, settings.auth)
+
+    @app.get(
+        "/health",
+        summary="Health probe",
+        description="Liveness probe for orchestrators. Always reachable, even when authorisation is enabled.",
+    )
+    async def health() -> dict:
+        """Report that the service is up"""
+        return {"status": "ok"}
 
     @app.exception_handler(GreeError)
     async def device_error_handler(_request: Request, exc: GreeError) -> JSONResponse:
@@ -134,6 +144,10 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
         """WebSocket endpoint for real-time device monitoring and control"""
+        if not auth_module.is_valid(settings.auth, auth_module.websocket_token(websocket)):
+            await websocket.close(code=auth_module.WS_POLICY_VIOLATION, reason="Missing or invalid token")
+            return
+
         await climate_manager.connection_manager.connect(websocket)
 
         try:

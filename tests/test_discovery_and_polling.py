@@ -39,7 +39,7 @@ async def test_polling_broadcasts_state_changes(discovered):
     broadcasts = capture_broadcasts(climate_manager)
     created[0].state = mock_state(SetTem=24)
 
-    await asyncio.sleep(climate_manager.args.polling_interval + 1)
+    await asyncio.sleep(climate_manager.settings.polling_interval + 1)
     await climate_manager.stop_polling()
 
     reports = [b for b in broadcasts if b["type"] == "report"]

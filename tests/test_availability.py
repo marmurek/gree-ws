@@ -1,5 +1,7 @@
 """Tests for telling clients when a device can and cannot be relied on."""
 
+from dataclasses import replace
+
 import pytest
 
 from conftest import MAC, capture_broadcasts, device_info, run_polling_briefly
@@ -14,8 +16,7 @@ from gree_ws.manager import NO_RESPONSE, RECOVERED, REMOVED, GreeClimateManager
 async def test_a_unit_going_quiet_is_announced(manager, device, monkeypatch):
     """Clients are told once when a device stops being usable"""
     monkeypatch.setattr(manager_module, "UNRESPONSIVE_AFTER", 2)
-    manager.args.response_timeout = 0.2
-    manager.args.polling_interval = 0.1
+    manager.settings = replace(manager.settings, response_timeout=0.2, polling_interval=0.1)
     manager.view_models[MAC] = await manager.device_view(MAC)
     device.alive = False
 

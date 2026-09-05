@@ -4,3 +4,4 @@ websockets==15.0.1
 greeclimate==3.2.0
 pydantic==2.11.7
 python-multipart==0.0.20
+PyYAML==6.0.3

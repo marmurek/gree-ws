@@ -11,11 +11,88 @@ Advanced REST and WebSocket API for controlling Gree air conditioners with real-
 - **WebSocket** - Real-time communication with clients
 - **State monitoring** - Automatic polling at a specified interval
 - **Change notifications** - Instant notifications about state changes via WebSocket
-- **Error handling** - Automatic reconnection to devices
+- **Error handling** - Detects units that stop answering, rebuilds them and follows a changed IP address
+- **Configurable** - Every setting in one YAML file, overridable from the environment
+- **Optional authorisation** - Shared token on REST and WebSocket, off by default
 
 ### Application Access
 - **API**: http://localhost:8123
 - **WebSocket**: ws://localhost:8123/ws
+
+## ⚙️ Configuration
+
+All settings live in [`config.yaml`](config.yaml). The file is optional - every setting has a default, so the application runs without it - and each value can be overridden by an environment variable, which is how the Docker image is configured.
+
+```yaml
+server:
+  port: 8123
+  dev_mode: false
+
+discovery:
+  timeout: 3
+
+polling:
+  interval: 2
+  response_timeout: 5
+
+logging:
+  verbose: false
+
+auth:
+  enabled: false
+  token: ""
+```
+
+| Setting | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `server.port` | `PORT` | `8123` | Port the API listens on |
+| `server.dev_mode` | `DEV_MODE` | `false` | Reload on source changes, for development |
+| `discovery.timeout` | `DISCOVERY_TIMEOUT` | `3` | How long to wait for units to answer the discovery broadcast, in seconds |
+| `polling.interval` | `POLLING_INTERVAL` | `2` | How often to ask each unit for its state, in seconds |
+| `polling.response_timeout` | `RESPONSE_TIMEOUT` | `5` | How long to wait for a unit to answer, in seconds |
+| `logging.verbose` | `VERBOSE` | `false` | Log every packet exchanged with the units |
+| `auth.enabled` | `AUTH_ENABLED` | `false` | Require a token on every request |
+| `auth.token` | `AUTH_TOKEN` | *(empty)* | The shared token clients must present |
+
+Point the application at a different file with `--config`, which is the only command line argument:
+
+```bash
+python3 main.py --config /etc/gree-ws/config.yaml
+```
+
+In Docker, set `CONFIG_FILE` or mount your own file over `/app/config.yaml`.
+
+`polling.response_timeout` also caps the binding handshake. greeclimate tries one cipher, waits for the timeout, then tries the other, so a large value makes startup slow when a newer unit is on the network.
+
+### 🔐 Authorisation
+
+Disabled by default: anyone who can reach the port can control the air conditioners. Since the container runs with `--network host`, that means every device on the local network.
+
+To turn it on, set a token:
+
+```yaml
+auth:
+  enabled: true
+  token: "a-long-random-string"
+```
+
+Enabling authorisation without a token is refused at startup rather than silently protecting nothing.
+
+Clients then present the token on every request:
+
+```bash
+curl -H "Authorization: Bearer a-long-random-string" http://localhost:8123/devices
+```
+
+`X-API-Key: <token>` is accepted as an alternative. For WebSocket connections the token goes in the same header, or - since browsers cannot set headers on a WebSocket - in a query parameter:
+
+```javascript
+const ws = new WebSocket('ws://localhost:8123/ws?token=a-long-random-string');
+```
+
+> **Note:** query strings end up in proxy and access logs. Prefer the header wherever the client allows it.
+
+A request without a valid token gets `401`; a WebSocket is closed with code `1008`. `GET /health`, `/docs`, `/redoc` and `/openapi.json` stay reachable without a token, so a health probe keeps working and the schema stays browsable.
 
 ## 🔌 REST API
 
@@ -151,18 +228,26 @@ docker run -it --name gree-ws --rm --network host gree-ws
 
 
 ### Environment variables
-The following environment variables can be set to control the application:
-
-- `PORT` — Port on which the application will listen (default: 8123)
-- `DISCOVERY_TIMEOUT` — Device discovery timeout in seconds (default: 3)
-- `POLLING_INTERVAL` — Device polling interval in seconds (default: 2)
-- `RESPONSE_TIMEOUT` — How long to wait for a device to answer a state request, in seconds (default: 5)
-- `VERBOSE` — Enable verbose logging (default: false)
+Every setting in [`config.yaml`](config.yaml) has a matching environment variable — see the [Configuration](#%EF%B8%8F-configuration) table. `CONFIG_FILE` selects a different configuration file inside the container.
 
 Example usage with Docker:
 ```bash
 docker run -it --name gree-ws --rm --network host -e DISCOVERY_TIMEOUT=5 -e POLLING_INTERVAL=5 gree-ws
 ```
+
+With authorisation enabled, keep the token out of the image:
+```bash
+docker run -it --name gree-ws --rm --network host \
+  -e AUTH_ENABLED=true -e AUTH_TOKEN="$(cat /run/secrets/gree_token)" gree-ws
+```
+
+Or mount your own configuration file:
+```bash
+docker run -it --name gree-ws --rm --network host \
+  -v ./my-config.yaml:/app/config.yaml:ro gree-ws
+```
+
+The container runs as an unprivileged user and its health check uses `GET /health`, which stays reachable when authorisation is on.
 
 ### Run with Docker Compose
 You can also use Docker Compose to run the application. Create a `docker-compose.yml` file with the following content:
@@ -175,6 +260,9 @@ services:
       - PORT=8123
       - DISCOVERY_TIMEOUT=5
       - POLLING_INTERVAL=1
+    # Or keep the settings in a file instead:
+    # volumes:
+    #   - ./config.yaml:/app/config.yaml:ro
 ```
 
 ## 🧑‍💻 Development

@@ -1,6 +1,5 @@
 """Device discovery, polling and command handling."""
 
-import argparse
 import asyncio
 import json
 import logging
@@ -11,6 +10,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from greeclimate.discovery import Discovery
 from greeclimate.exceptions import DeviceNotBoundError, DeviceTimeoutError
 
+from gree_ws.config import Settings
 from gree_ws.conversions import normalize_mac
 from gree_ws.device import GreeDevice
 from gree_ws.errors import DeviceNotFound, DeviceUnavailable, InvalidCommand
@@ -84,8 +84,8 @@ class ConnectionManager:
 class GreeClimateManager:
     """Manages Gree devices, discovery, polling, and state updates"""
 
-    def __init__(self, args: argparse.Namespace):
-        self.args = args
+    def __init__(self, settings: Settings):
+        self.settings = settings
         self.devices: Dict[MacAddress, GreeDevice] = {}
         self.missed_responses: Dict[MacAddress, int] = {}
         self.discovery_lock = asyncio.Lock()
@@ -142,7 +142,7 @@ class GreeClimateManager:
     async def _scan(self) -> list:
         """Broadcast a discovery request, returning whatever answered"""
         try:
-            return await self.discovery.scan(wait_for=self.args.discovery_timeout)
+            return await self.discovery.scan(wait_for=self.settings.discovery_timeout)
         except Exception as e:
             logger.error("Discovery failed: %s", e)
             return []
@@ -192,12 +192,12 @@ class GreeClimateManager:
             # CipherV2 after bind_timeout, so a newer unit costs a full timeout
             # of dead air at startup. Its default is 10s; ours is the same wait
             # we allow for any other answer from a unit.
-            device = GreeDevice(device_info, bind_timeout=self.args.response_timeout)
+            device = GreeDevice(device_info, bind_timeout=self.settings.response_timeout)
             await device.bind()
 
             # Binding only proves the unit answered the handshake. Waiting for a
             # real state answer is what tells us it is actually usable.
-            if not await device.refresh_state(self.args.response_timeout):
+            if not await device.refresh_state(self.settings.response_timeout):
                 logger.error("Device %s bound but never reported its state", device_info.ip)
                 device.close()
                 return
@@ -315,7 +315,7 @@ class GreeClimateManager:
 
         if update_state:
             try:
-                answered = await device.refresh_state(self.args.response_timeout)
+                answered = await device.refresh_state(self.settings.response_timeout)
             except (DeviceNotBoundError, DeviceTimeoutError) as e:
                 logger.error("Failed to update device %s: %s", mac, e)
                 await self._record_response(mac, False)
@@ -386,7 +386,7 @@ class GreeClimateManager:
                 current_state = await self.device_view(mac)
 
                 if current_state.mac == "000000000000":  # Skip if we couldn't get state
-                    await asyncio.sleep(self.args.polling_interval)
+                    await asyncio.sleep(self.settings.polling_interval)
                     continue
 
                 missed = self.missed_responses.get(mac, 0)
@@ -394,7 +394,7 @@ class GreeClimateManager:
                     logger.warning("Device %s has missed %d state requests, rebuilding it", mac, missed)
                     if await self._recover_device(mac):
                         logger.info("Device %s recovered", mac)
-                    await asyncio.sleep(self.args.polling_interval)
+                    await asyncio.sleep(self.settings.polling_interval)
                     continue
 
                 changes = self._changes_since(mac, current_state)
@@ -411,14 +411,14 @@ class GreeClimateManager:
                     except Exception as e:
                         logger.error("Failed to send state change notification for %s: %s", mac, e)
 
-                await asyncio.sleep(self.args.polling_interval)
+                await asyncio.sleep(self.settings.polling_interval)
 
             except asyncio.CancelledError:
                 logger.info("Polling cancelled for device: %s", mac)
                 break
             except Exception as e:
                 logger.error("Error polling device %s: %s", mac, e)
-                await asyncio.sleep(self.args.polling_interval * 2)  # Wait longer on error
+                await asyncio.sleep(self.settings.polling_interval * 2)  # Wait longer on error
 
     async def stop_polling(self) -> None:
         """Stop all polling tasks and wait for them to finish"""
@@ -467,7 +467,7 @@ class GreeClimateManager:
             modified = self._apply_fields(device, data)
             await device.push_state_update()
 
-            if not await device.refresh_state(self.args.response_timeout):
+            if not await device.refresh_state(self.settings.response_timeout):
                 raise DeviceTimeoutError("device did not acknowledge the command")
 
         return modified

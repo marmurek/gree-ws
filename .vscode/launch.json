@@ -11,9 +11,8 @@
             "program": "main.py",
             "console": "integratedTerminal",
             "args": [
-                // "--port", "8123",
-                "--dev_mode",
-                // "--verbose"
+                // All settings live in config.yaml; point at another file with:
+                // "--config", "config.dev.yaml"
             ],
         }
     ]

@@ -5,9 +5,9 @@ replaced by a fake, so the protocol encoding, the cipher and every property
 getter and setter are the library's own - only the network is simulated.
 """
 
-import argparse
 import asyncio
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -19,6 +19,7 @@ from greeclimate.cipher import CipherV1
 from greeclimate.device import DeviceInfo
 
 from gree_ws import manager as manager_module
+from gree_ws.config import Settings
 from gree_ws.device import GreeDevice
 from gree_ws.manager import GreeClimateManager
 
@@ -148,21 +149,16 @@ async def run_polling_briefly(climate_manager, seconds: float = 2.0) -> list:
 
 
 @pytest.fixture(name="cli_args")
-def cli_args_fixture() -> argparse.Namespace:
-    """Command line arguments with a fast polling interval"""
-    return argparse.Namespace(
-        discovery_timeout=1, polling_interval=1, response_timeout=1.0, verbose=False, port=8123, dev_mode=False
-    )
+def cli_args_fixture() -> Settings:
+    """Settings with a fast polling interval"""
+    return Settings(discovery_timeout=1, polling_interval=1, response_timeout=1.0)
 
 
 @pytest.fixture(name="fast_args")
-def fast_args_fixture(cli_args, monkeypatch):
+def fast_args_fixture(cli_args, monkeypatch) -> Settings:
     """Timings short enough to watch a unit be declared gone and rebuilt"""
-    cli_args.response_timeout = 0.2
-    cli_args.polling_interval = 0.1
-    cli_args.discovery_timeout = 0
     monkeypatch.setattr(manager_module, "UNRESPONSIVE_AFTER", 2)
-    return cli_args
+    return replace(cli_args, response_timeout=0.2, polling_interval=0.1, discovery_timeout=0)
 
 
 @pytest.fixture(name="device")
