@@ -6,7 +6,7 @@ import re
 import time
 from typing import Dict, Optional, Set, List, Annotated
 from enum import Enum
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, StringConstraints, Field
@@ -106,6 +106,23 @@ class GreeDevice(Device):
     def silent_for(self) -> Optional[float]:
         """Seconds since the unit last answered, or None if it never has"""
         return None if self.last_response is None else time.monotonic() - self.last_response
+
+    @contextmanager
+    def rollback_on_failure(self):
+        """Undo pending property changes when the command fails to land.
+
+        Setting a property writes it straight into the local property cache, so
+        a command that never reaches the unit would otherwise be reported as the
+        device's state until the next successful read contradicted it.
+        """
+        properties = dict(self._properties)
+        dirty = list(self._dirty)
+        try:
+            yield
+        except Exception:
+            self._properties = properties
+            self._dirty = dirty
+            raise
 
     async def refresh_state(self, timeout: float) -> bool:
         """Ask for the current state and wait for it.
@@ -343,6 +360,12 @@ def create_view_model() -> DeviceViewModel:
     )
 
 
+# How many unanswered state requests before a unit is treated as gone and
+# rebuilt. Each miss costs a response timeout plus a polling interval, so this
+# is a lot longer in wall clock than it looks.
+UNRESPONSIVE_AFTER = 5
+
+
 class GreeClimateManager:
     """Manages Gree devices, discovery, polling, and state updates"""
 
@@ -350,6 +373,7 @@ class GreeClimateManager:
         self.args = args
         self.devices: Dict[MacAddress, GreeDevice] = {}
         self.missed_responses: Dict[MacAddress, int] = {}
+        self.discovery_lock = asyncio.Lock()
         self.discovery = Discovery()
         self.connection_manager = ConnectionManager(args)
         self.view_models: Dict[MacAddress, DeviceViewModel] = {}
@@ -358,19 +382,38 @@ class GreeClimateManager:
 
     async def discover_devices(self) -> List[MacAddress]:
         """Discover and bind to Gree devices"""
+        async with self.discovery_lock:
+            return await self._discover_devices()
+
+    async def _scan(self) -> list:
+        """Broadcast a discovery request, returning whatever answered"""
+        try:
+            return await self.discovery.scan(wait_for=self.args.discovery_timeout)
+        except Exception as e:
+            logger.error("Discovery failed: %s", e)
+            return []
+
+    async def _discover_devices(self) -> List[MacAddress]:
+        """Refresh the device roster, holding the discovery lock"""
         logger.info("Starting device discovery...")
 
         await self.stop_polling()
 
-        try:
-            found_devices = await self.discovery.scan(wait_for=self.args.discovery_timeout)
-        except Exception as e:
-            logger.error("Discovery failed: %s", e)
-            found_devices = []
+        found_devices = await self._scan()
+        found = {normalize_mac(info.mac): info for info in found_devices}
+
+        # A unit that is still answering is left alone: rebinding it would throw
+        # away a working session and its socket for nothing.
+        to_bind = [info for mac, info in found.items() if not self._is_usable(mac, info)]
+
+        # Units that neither answered the broadcast nor our last requests are gone.
+        for mac in [m for m in self.devices if m not in found and not self._is_responsive(m)]:
+            logger.info("Device %s no longer answers and was not rediscovered, dropping it", mac)
+            self._forget_device(mac)
 
         # Units are independent, so bind them at the same time rather than
         # paying the handshake once per device in sequence.
-        await asyncio.gather(*(self._bind_device(info) for info in found_devices))
+        await asyncio.gather(*(self._bind_device(info) for info in to_bind))
 
         logger.info("Discovery complete. Found %d devices. Initializing polling tasks...", len(self.devices))
 
@@ -408,7 +451,10 @@ class GreeClimateManager:
                 device.close()
                 return
 
-            self.devices[normalize_mac(device_info.mac)] = device
+            mac = normalize_mac(device_info.mac)
+            self._close_quietly(self.devices.get(mac))
+            self.devices[mac] = device
+            self.missed_responses[mac] = 0
             logger.info("Device bound: %s at %s", device_info.name, device_info.ip)
 
         except (DeviceNotBoundError, DeviceTimeoutError) as e:
@@ -427,6 +473,56 @@ class GreeClimateManager:
             device.close()
         except Exception as e:  # the socket may never have been created
             logger.debug("Closing device socket failed: %s", e)
+
+    def _is_responsive(self, mac: MacAddress) -> bool:
+        """Has this unit answered us recently enough to be considered alive"""
+        return mac in self.devices and self.missed_responses.get(mac, 0) < UNRESPONSIVE_AFTER
+
+    def _is_usable(self, mac: MacAddress, device_info) -> bool:
+        """Can the device we already hold keep serving this discovered unit"""
+        device = self.devices.get(mac)
+        if device is None or not self._is_responsive(mac):
+            return False
+        # A unit that moved needs a new socket: the old one is bound to its old address.
+        return device.device_info.ip == device_info.ip
+
+    def _forget_device(self, mac: MacAddress) -> None:
+        """Drop a unit and release everything held on its behalf"""
+        task = self.polling_tasks.pop(mac, None)
+        if task is not None:
+            task.cancel()
+
+        self._close_quietly(self.devices.pop(mac, None))
+        self.view_models.pop(mac, None)
+        self.measurement_timestamps.pop(mac, None)
+        self.missed_responses.pop(mac, None)
+
+    async def _recover_device(self, mac: MacAddress) -> bool:
+        """Rebuild a unit that stopped answering.
+
+        Rebinding the existing object cannot work: greeclimate never clears its
+        `ready` event, so a second bind() returns instantly without waiting for
+        the handshake, having already replaced the session key with the generic
+        one. The only way back is a new object, with a new socket, a freshly
+        negotiated key and whatever address the unit came back on.
+        """
+        old = self.devices.get(mac)
+        if old is None:
+            return False
+
+        async with self.discovery_lock:
+            device_info = old.device_info
+            for info in await self._scan():
+                if normalize_mac(info.mac) == mac:
+                    if info.ip != device_info.ip:
+                        logger.info("Device %s moved from %s to %s", mac, device_info.ip, info.ip)
+                    device_info = info
+                    break
+
+            logger.info("Rebuilding device %s at %s", mac, device_info.ip)
+            await self._bind_device(device_info)
+
+        return self._is_responsive(mac) and self.devices.get(mac) is not old
 
     def _record_response(self, mac: MacAddress, answered: bool) -> None:
         """Track whether a unit is still talking to us, and say so once"""
@@ -543,6 +639,14 @@ class GreeClimateManager:
                     await asyncio.sleep(self.args.polling_interval)
                     continue
 
+                missed = self.missed_responses.get(mac, 0)
+                if missed and missed % UNRESPONSIVE_AFTER == 0:
+                    logger.warning("Device %s has missed %d state requests, rebuilding it", mac, missed)
+                    if await self._recover_device(mac):
+                        logger.info("Device %s recovered", mac)
+                    await asyncio.sleep(self.args.polling_interval)
+                    continue
+
                 last_state = self.view_models.get(mac, create_view_model())
 
                 current = current_state.model_dump()
@@ -600,18 +704,67 @@ class GreeClimateManager:
                 await asyncio.sleep(self.args.polling_interval * 2)  # Wait longer on error
 
     async def stop_polling(self):
-        """Stop all polling tasks"""
-        for task in self.polling_tasks.values():
-            task.cancel()
+        """Stop all polling tasks and wait for them to finish"""
+        tasks = list(self.polling_tasks.values())
         self.polling_tasks.clear()
 
-    async def send_update(self, mac: MacAddress, data: DeviceUpdateModel) -> bool:
-        """Send update to device"""
+        for task in tasks:
+            task.cancel()
 
-        device = self.devices.get(mac)
-        if device is None:
+        # Without waiting, a cancelled loop can still be mid-request while its
+        # replacement starts, and both then talk to the same device.
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def send_update(self, mac: MacAddress, data: DeviceUpdateModel) -> bool:
+        """Send an update to a device, rebuilding it once if it has gone quiet"""
+
+        if mac not in self.devices:
             raise HTTPException(status_code=404, detail="Device not found")
 
+        try:
+            return await self._apply_and_push(self.devices[mac], data)
+
+        except (DeviceNotBoundError, DeviceTimeoutError) as e:
+            logger.error("Failed to send command to device %s: %s", mac, e)
+
+            # The unit stopped answering. Rebuild it and re-apply the command to
+            # the new object; the old one's pending changes went with it.
+            if await self._recover_device(mac):
+                try:
+                    return await self._apply_and_push(self.devices[mac], data)
+                except Exception as retry_error:
+                    logger.error("Command failed again after rebuilding %s: %s", mac, retry_error)
+                    raise HTTPException(
+                        status_code=503, detail=f"Device communication error: {str(e)}"
+                    ) from retry_error
+
+            raise HTTPException(status_code=503, detail=f"Device communication error: {str(e)}") from e
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("Unexpected error sending command to device %s: %s", mac, e)
+            raise HTTPException(status_code=500, detail=f"Command failed: {str(e)}") from e
+
+    async def _apply_and_push(self, device: GreeDevice, data: DeviceUpdateModel) -> bool:
+        """Apply the requested fields and send them, confirming they landed.
+
+        Everything is rolled back unless the unit acknowledges the command, so a
+        command that never arrived is never reported back as the device's state.
+        """
+        with device.rollback_on_failure():
+            modified = self._apply_fields(device, data)
+            await device.push_state_update()
+
+            if not await device.refresh_state(self.args.response_timeout):
+                raise DeviceTimeoutError("device did not acknowledge the command")
+
+        return modified
+
+    @staticmethod
+    def _apply_fields(device: GreeDevice, data: DeviceUpdateModel) -> bool:
+        """Copy the requested fields onto the device, reporting whether any differ"""
         modified = False
 
         if data.power is not None:
@@ -683,22 +836,6 @@ class GreeClimateManager:
         if data.steady_heat is not None:
             modified = device.steady_heat != data.steady_heat or modified
             device.steady_heat = data.steady_heat
-
-        try:
-            await device.push_state_update()
-
-        except (DeviceNotBoundError, DeviceTimeoutError) as e:
-            logger.error("Failed to send command to device %s: %s", mac, e)
-            # Try to rebind and retry
-            try:
-                await device.bind()
-                await device.push_state_update()
-            except Exception as rebind_error:
-                logger.error("Failed to rebind and retry command for device %s: %s", mac, rebind_error)
-                raise HTTPException(status_code=503, detail=f"Device communication error: {str(e)}") from rebind_error
-        except Exception as e:
-            logger.error("Unexpected error sending command to device %s: %s", mac, e)
-            raise HTTPException(status_code=500, detail=f"Command failed: {str(e)}") from e
 
         return modified
 
