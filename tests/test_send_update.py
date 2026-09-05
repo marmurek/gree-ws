@@ -2,10 +2,17 @@
 
 import pydantic
 import pytest
-from fastapi import HTTPException
+from gree_ws.errors import DeviceNotFound
 
 from conftest import MAC
-from main import DeviceFanSpeed, DeviceMode, DeviceUpdateModel, DeviceVerticalSwing, HUMIDITY_MAX, HUMIDITY_MIN
+from gree_ws.models import (
+    HUMIDITY_MAX,
+    HUMIDITY_MIN,
+    DeviceFanSpeed,
+    DeviceMode,
+    DeviceUpdateModel,
+    DeviceVerticalSwing,
+)
 
 
 @pytest.mark.asyncio
@@ -122,7 +129,5 @@ async def test_toggling_quiet_is_a_change(manager, device):
 @pytest.mark.asyncio
 async def test_updating_an_unknown_device_is_reported_as_not_found(manager):
     """A MAC the manager does not hold must not raise a bare KeyError"""
-    with pytest.raises(HTTPException) as raised:
+    with pytest.raises(DeviceNotFound):
         await manager.send_update("ffffffffffff", DeviceUpdateModel(power=True))
-
-    assert raised.value.status_code == 404

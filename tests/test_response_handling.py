@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-import main
+from gree_ws.manager import GreeClimateManager
 from conftest import MAC, FakeDevice, device_info, mock_state, run_polling_briefly
 
 # The view builder and the polling loop are internal; these tests drive them directly.
@@ -43,7 +43,7 @@ async def test_the_view_shows_the_answer_to_the_request_it_just_made(manager, de
     """
     device.state = mock_state(SetTem=28)
 
-    view = await manager._get_device_view_model(MAC)
+    view = await manager.device_view(MAC)
 
     assert view.target_temperature == 28
 
@@ -51,11 +51,11 @@ async def test_the_view_shows_the_answer_to_the_request_it_just_made(manager, de
 @pytest.mark.asyncio
 async def test_a_silent_device_keeps_its_last_known_state(manager, device):
     """Nothing new arriving must not be published as a fresh reading"""
-    manager.view_models[MAC] = await manager._get_device_view_model(MAC)
+    manager.view_models[MAC] = await manager.device_view(MAC)
     device.alive = False
     device.state = mock_state(SetTem=28)
 
-    view = await manager._get_device_view_model(MAC)
+    view = await manager.device_view(MAC)
 
     assert view.target_temperature == 21
     assert manager.missed_responses[MAC] == 1
@@ -65,12 +65,12 @@ async def test_a_silent_device_keeps_its_last_known_state(manager, device):
 async def test_missed_responses_are_counted_and_cleared(manager, device):
     """Silence accumulates, and a unit coming back resets the count"""
     device.alive = False
-    await manager._get_device_view_model(MAC)
-    await manager._get_device_view_model(MAC)
+    await manager.device_view(MAC)
+    await manager.device_view(MAC)
     assert manager.missed_responses[MAC] == 2
 
     device.alive = True
-    await manager._get_device_view_model(MAC)
+    await manager.device_view(MAC)
 
     assert manager.missed_responses[MAC] == 0
 
@@ -78,7 +78,7 @@ async def test_missed_responses_are_counted_and_cleared(manager, device):
 @pytest.mark.asyncio
 async def test_a_silent_device_is_not_reported_as_a_state_change(manager, device):
     """A unit going quiet must not broadcast a spurious report"""
-    manager.view_models[MAC] = await manager._get_device_view_model(MAC)
+    manager.view_models[MAC] = await manager.device_view(MAC)
     device.alive = False
 
     broadcasts = await run_polling_briefly(manager, seconds=2.5)
@@ -110,7 +110,7 @@ async def test_a_unit_that_never_reports_its_state_is_discarded(cli_args, discov
 
     discovery([device_info()], factory=goes_quiet_after_bind)
 
-    climate_manager = main.GreeClimateManager(cli_args)
+    climate_manager = GreeClimateManager(cli_args)
     macs = await climate_manager.discover_devices()
     await climate_manager.stop_polling()
 
@@ -129,7 +129,7 @@ async def test_units_are_bound_concurrently(cli_args, discovery):
 
     discovery([device_info(mac=f"aabbcc00112{n}") for n in range(3)], factory=slow)
 
-    climate_manager = main.GreeClimateManager(cli_args)
+    climate_manager = GreeClimateManager(cli_args)
     started = time.monotonic()
     macs = await climate_manager.discover_devices()
     elapsed = time.monotonic() - started

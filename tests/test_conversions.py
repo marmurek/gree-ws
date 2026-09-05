@@ -3,17 +3,14 @@
 import pytest
 from greeclimate.device import FanSpeed, HorizontalSwing, Mode, VerticalSwing
 
-from main import (
-    DeviceFanSpeed,
-    DeviceHorizontalSwing,
-    DeviceMode,
-    DeviceVerticalSwing,
+from gree_ws.conversions import (
     from_device_enum,
     normalize_mac,
     pascal_to_snake,
     snake_to_pascal,
     to_device_enum,
 )
+from gree_ws.models import DeviceFanSpeed, DeviceHorizontalSwing, DeviceMode, DeviceVerticalSwing
 
 
 class UnknownValue:

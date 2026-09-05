@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-import main
+from gree_ws.manager import GreeClimateManager
 from conftest import FAKE_KEY, MAC, FakeDevice, device_info, mock_state
 
 
@@ -12,7 +12,7 @@ from conftest import FAKE_KEY, MAC, FakeDevice, device_info, mock_state
 def discovered_fixture(cli_args, discovery):
     """A manager wired to discover exactly one fake device"""
     created = discovery([device_info()])
-    return main.GreeClimateManager(cli_args), created
+    return GreeClimateManager(cli_args), created
 
 
 @pytest.mark.asyncio
@@ -65,7 +65,7 @@ async def test_a_device_that_fails_to_bind_is_skipped(cli_args, discovery):
 
     discovery([device_info()], factory=never_answers)
 
-    climate_manager = main.GreeClimateManager(cli_args)
+    climate_manager = GreeClimateManager(cli_args)
     macs = await climate_manager.discover_devices()
     await climate_manager.stop_polling()
 
@@ -94,7 +94,7 @@ async def test_a_discovered_mac_is_keyed_the_way_it_is_reported(cli_args, discov
     """
     discovery([device_info(mac="AA:BB:CC:00:11:22")])
 
-    climate_manager = main.GreeClimateManager(cli_args)
+    climate_manager = GreeClimateManager(cli_args)
     macs = await climate_manager.discover_devices()
     await climate_manager.stop_polling()
 

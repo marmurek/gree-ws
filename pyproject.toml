@@ -8,7 +8,7 @@
 #   black .          format the code
 #   black --check .  verify formatting without touching files
 #   mypy             check types (files to check are configured below)
-#   pylint main.py tests   check style and common mistakes
+#   pylint main.py gree_ws tests   check style and common mistakes
 #   pytest           run the test suite
 
 [tool.black]
@@ -30,7 +30,7 @@ timeout_method = "signal"
 
 [tool.mypy]
 python_version = "3.13"
-files = ["main.py", "tests"]
+files = ["main.py", "gree_ws", "tests"]
 
 # Without this mypy does not understand Pydantic field defaults and reports
 # every model construction as missing arguments.

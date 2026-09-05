@@ -4,14 +4,13 @@ These cover the failure that froze the whole application: a lock held across
 an await, plus the iteration race it was hiding.
 """
 
-import argparse
 import asyncio
 import time
 
 import pytest
 from fastapi import WebSocketDisconnect
 
-import main
+from gree_ws.manager import ConnectionManager
 
 
 class FakeWebSocket:
@@ -37,9 +36,9 @@ class FakeWebSocket:
 
 
 @pytest.fixture(name="connections")
-def connections_fixture() -> main.ConnectionManager:
+def connections_fixture() -> ConnectionManager:
     """An empty connection manager"""
-    return main.ConnectionManager(argparse.Namespace())
+    return ConnectionManager()
 
 
 @pytest.mark.asyncio

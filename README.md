@@ -165,7 +165,8 @@ The code is checked with black, mypy and pylint. All three read their settings f
 pip install -r requirements-dev.txt
 black .
 mypy
-pylint main.py
+pylint main.py gree_ws tests
+pytest
 ```
 
 `mypy` follows the `greeclimate` sources even though the library ships no `py.typed` marker - that is what makes it able to report a mistyped device property instead of letting it fail silently at runtime.

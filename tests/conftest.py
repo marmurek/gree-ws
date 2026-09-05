@@ -1,6 +1,6 @@
 """Shared fixtures for the Gree Climate API tests.
 
-The tests exercise main.py against a real greeclimate Device whose UDP layer is
+The tests exercise the application against a real greeclimate Device whose UDP layer is
 replaced by a fake, so the protocol encoding, the cipher and every property
 getter and setter are the library's own - only the network is simulated.
 """
@@ -12,17 +12,15 @@ from pathlib import Path
 
 import pytest
 
-# main.py parses the command line while it is being imported, so it has to see
-# an empty argv rather than pytest's. Removing this need is a later cleanup.
-sys.argv = ["main.py"]
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # pylint: disable=wrong-import-position
 from greeclimate.cipher import CipherV1
 from greeclimate.device import DeviceInfo
 
-import main
-from main import GreeDevice
+from gree_ws import manager as manager_module
+from gree_ws.device import GreeDevice
+from gree_ws.manager import GreeClimateManager
 
 FAKE_KEY = "abcdefgh12345678"
 MAC = "aabbcc001122"
@@ -180,7 +178,7 @@ def discovery_fixture(monkeypatch):
         async def scan(_self, wait_for=0, bcast_ifaces=None):  # pylint: disable=unused-argument
             return list(infos)
 
-        monkeypatch.setattr(main, "GreeDevice", build)
+        monkeypatch.setattr(manager_module, "GreeDevice", build)
         monkeypatch.setattr("greeclimate.discovery.Discovery.scan", scan)
         return created
 
@@ -188,8 +186,8 @@ def discovery_fixture(monkeypatch):
 
 
 @pytest.fixture(name="manager")
-def manager_fixture(cli_args, device) -> main.GreeClimateManager:
+def manager_fixture(cli_args, device) -> GreeClimateManager:
     """A manager holding the single fake device, with no polling running"""
-    climate_manager = main.GreeClimateManager(cli_args)
+    climate_manager = GreeClimateManager(cli_args)
     climate_manager.devices[MAC] = device
     return climate_manager

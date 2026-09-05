@@ -10,9 +10,10 @@ session key with the generic one. Recovery has to build a new object.
 import asyncio
 
 import pytest
-from fastapi import HTTPException
+from gree_ws.errors import DeviceUnavailable
 
-import main
+from gree_ws import manager as manager_module, models
+from gree_ws.manager import GreeClimateManager
 from conftest import MAC, device_info, mock_state
 
 # The roster internals are what these tests are about.
@@ -25,7 +26,7 @@ def fast_args_fixture(cli_args, monkeypatch):
     cli_args.response_timeout = 0.2
     cli_args.polling_interval = 0.1
     cli_args.discovery_timeout = 0
-    monkeypatch.setattr(main, "UNRESPONSIVE_AFTER", 2)
+    monkeypatch.setattr(manager_module, "UNRESPONSIVE_AFTER", 2)
     return cli_args
 
 
@@ -33,7 +34,7 @@ def fast_args_fixture(cli_args, monkeypatch):
 async def test_a_silent_unit_is_rebuilt(fast_args, discovery):
     """The polling loop notices sustained silence and builds a new device"""
     created = discovery([device_info()])
-    manager = main.GreeClimateManager(fast_args)
+    manager = GreeClimateManager(fast_args)
     await manager.discover_devices()
     original = created[0]
 
@@ -52,7 +53,7 @@ async def test_recovery_follows_a_unit_that_changed_address(fast_args, discovery
     """A unit that comes back on a new IP is rebuilt against that address"""
     infos = [device_info(ip="1.1.1.0")]
     created = discovery(infos)
-    manager = main.GreeClimateManager(fast_args)
+    manager = GreeClimateManager(fast_args)
     await manager.discover_devices()
 
     created[0].alive = False
@@ -68,7 +69,7 @@ async def test_recovery_follows_a_unit_that_changed_address(fast_args, discovery
 async def test_the_old_socket_is_released_when_a_unit_is_rebuilt(fast_args, discovery):
     """Rebuilding must not leak the socket of the device it replaces"""
     created = discovery([device_info()])
-    manager = main.GreeClimateManager(fast_args)
+    manager = GreeClimateManager(fast_args)
     await manager.discover_devices()
 
     original = created[0]
@@ -86,7 +87,7 @@ async def test_the_old_socket_is_released_when_a_unit_is_rebuilt(fast_args, disc
 async def test_a_working_unit_is_not_rebound_on_rediscovery(fast_args, discovery):
     """Rediscovery must leave a healthy session alone"""
     created = discovery([device_info()])
-    manager = main.GreeClimateManager(fast_args)
+    manager = GreeClimateManager(fast_args)
     await manager.discover_devices()
     original = manager.devices[MAC]
 
@@ -102,11 +103,11 @@ async def test_a_unit_that_vanished_and_is_silent_is_dropped(fast_args, discover
     """A unit that neither answers nor reappears is forgotten entirely"""
     infos = [device_info()]
     created = discovery(infos)
-    manager = main.GreeClimateManager(fast_args)
+    manager = GreeClimateManager(fast_args)
     await manager.discover_devices()
 
     created[0].alive = False
-    manager.missed_responses[MAC] = main.UNRESPONSIVE_AFTER
+    manager.missed_responses[MAC] = manager_module.UNRESPONSIVE_AFTER
     infos.clear()  # it does not answer the broadcast either
 
     macs = await manager.discover_devices()
@@ -124,7 +125,7 @@ async def test_a_unit_that_missed_the_broadcast_but_still_answers_is_kept(fast_a
     """Silence on the broadcast alone is not enough to drop a working unit"""
     infos = [device_info()]
     discovery(infos)
-    manager = main.GreeClimateManager(fast_args)
+    manager = GreeClimateManager(fast_args)
     await manager.discover_devices()
     infos.clear()
 
@@ -138,7 +139,7 @@ async def test_a_unit_that_missed_the_broadcast_but_still_answers_is_kept(fast_a
 async def test_concurrent_discoveries_do_not_interleave(fast_args, discovery):
     """Two rediscoveries at once are serialised rather than racing"""
     discovery([device_info()])
-    manager = main.GreeClimateManager(fast_args)
+    manager = GreeClimateManager(fast_args)
 
     results = await asyncio.gather(manager.discover_devices(), manager.discover_devices())
     await manager.stop_polling()
@@ -151,7 +152,7 @@ async def test_concurrent_discoveries_do_not_interleave(fast_args, discovery):
 async def test_stop_polling_waits_for_the_tasks_to_finish(fast_args, discovery):
     """Cancelled loops must be finished before their replacements start"""
     discovery([device_info()])
-    manager = main.GreeClimateManager(fast_args)
+    manager = GreeClimateManager(fast_args)
     await manager.discover_devices()
     tasks = list(manager.polling_tasks.values())
 
@@ -172,10 +173,8 @@ async def test_an_unacknowledged_command_leaves_no_phantom_state(manager, device
     before = device.target_temperature
     device.alive = False
 
-    with pytest.raises(HTTPException) as raised:
-        await manager.send_update(MAC, main.DeviceUpdateModel(target_temperature=before + 3))
-
-    assert raised.value.status_code == 503
+    with pytest.raises(DeviceUnavailable):
+        await manager.send_update(MAC, models.DeviceUpdateModel(target_temperature=before + 3))
     assert device.target_temperature == before
     assert not device._dirty
 
@@ -186,7 +185,7 @@ async def test_an_acknowledged_command_is_reported_as_applied(manager, device):
     target = device.target_temperature + 3
     device.state = mock_state(SetTem=target)
 
-    modified = await manager.send_update(MAC, main.DeviceUpdateModel(target_temperature=target))
+    modified = await manager.send_update(MAC, models.DeviceUpdateModel(target_temperature=target))
 
     assert modified is True
     assert device.target_temperature == target
@@ -196,14 +195,14 @@ async def test_an_acknowledged_command_is_reported_as_applied(manager, device):
 async def test_a_command_is_retried_against_a_rebuilt_device(fast_args, discovery):
     """A command to a unit that has gone quiet rebuilds it and tries again"""
     created = discovery([device_info()])
-    manager = main.GreeClimateManager(fast_args)
+    manager = GreeClimateManager(fast_args)
     await manager.discover_devices()
     await manager.stop_polling()
 
     original = created[0]
     original.alive = False
 
-    modified = await manager.send_update(MAC, main.DeviceUpdateModel(target_temperature=27))
+    modified = await manager.send_update(MAC, models.DeviceUpdateModel(target_temperature=27))
 
     assert modified is True
     assert manager.devices[MAC] is not original

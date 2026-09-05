@@ -18,7 +18,7 @@ async def test_a_sensor_that_starts_reporting_is_not_treated_as_jitter(manager):
     are Optional, so the first reading after a silent sensor raised TypeError.
     The polling loop swallowed it and simply stopped reporting anything.
     """
-    seed = await manager._get_device_view_model(MAC, update_state=False)
+    seed = await manager.device_view(MAC, update_state=False)
     seed.current_humidity = None  # as if the unit had not answered yet
     manager.view_models[MAC] = seed
     # Inside the one minute window, so the jitter filter is the code under test
@@ -34,7 +34,7 @@ async def test_a_sensor_that_starts_reporting_is_not_treated_as_jitter(manager):
 @pytest.mark.asyncio
 async def test_a_sensor_that_goes_quiet_is_reported(manager, device):
     """A value to null transition is reported too"""
-    seed = await manager._get_device_view_model(MAC, update_state=False)
+    seed = await manager.device_view(MAC, update_state=False)
     manager.view_models[MAC] = seed
     manager.measurement_timestamps[MAC] = asyncio.get_running_loop().time()
     # The unit drops the humidity field from its answers. greeclimate only ever
@@ -54,7 +54,7 @@ async def test_a_sensor_that_goes_quiet_is_reported(manager, device):
 @pytest.mark.asyncio
 async def test_one_degree_jitter_is_suppressed(manager):
     """A single degree wobble soon after a reading is not worth reporting"""
-    seed = await manager._get_device_view_model(MAC, update_state=False)
+    seed = await manager.device_view(MAC, update_state=False)
     seed.current_temperature = seed.current_temperature + 1
     manager.view_models[MAC] = seed
     manager.measurement_timestamps[MAC] = asyncio.get_running_loop().time()
@@ -67,7 +67,7 @@ async def test_one_degree_jitter_is_suppressed(manager):
 @pytest.mark.asyncio
 async def test_a_real_temperature_move_is_reported(manager):
     """A change of more than one degree is always reported"""
-    seed = await manager._get_device_view_model(MAC, update_state=False)
+    seed = await manager.device_view(MAC, update_state=False)
     seed.current_temperature = seed.current_temperature + 4
     manager.view_models[MAC] = seed
     manager.measurement_timestamps[MAC] = asyncio.get_running_loop().time()
@@ -82,7 +82,7 @@ async def test_a_real_temperature_move_is_reported(manager):
 @pytest.mark.asyncio
 async def test_jitter_is_reported_once_the_window_has_passed(manager):
     """After a minute of quiet even a one degree change is worth sending"""
-    seed = await manager._get_device_view_model(MAC, update_state=False)
+    seed = await manager.device_view(MAC, update_state=False)
     seed.current_temperature = seed.current_temperature + 1
     manager.view_models[MAC] = seed
     manager.measurement_timestamps[MAC] = asyncio.get_running_loop().time() - 120
