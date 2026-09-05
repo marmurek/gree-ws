@@ -121,14 +121,20 @@ class FakeDevice(GreeDevice):
         return dict(zip(command["pack"]["opt"], command["pack"]["p"]))
 
 
-async def run_polling_briefly(climate_manager, seconds: float = 2.0) -> list:
-    """Run one device's polling loop for a moment and return what it broadcast"""
+def capture_broadcasts(climate_manager) -> list:
+    """Redirect a manager's broadcasts into a list and return it"""
     broadcasts: list = []
 
     async def capture(data):
         broadcasts.append(data)
 
     climate_manager.connection_manager.broadcast = capture
+    return broadcasts
+
+
+async def run_polling_briefly(climate_manager, seconds: float = 2.0) -> list:
+    """Run one device's polling loop for a moment and return what it broadcast"""
+    broadcasts = capture_broadcasts(climate_manager)
 
     task = asyncio.create_task(climate_manager._poll_device_state(MAC))  # pylint: disable=protected-access
     await asyncio.sleep(seconds)
@@ -147,6 +153,16 @@ def cli_args_fixture() -> argparse.Namespace:
     return argparse.Namespace(
         discovery_timeout=1, polling_interval=1, response_timeout=1.0, verbose=False, port=8123, dev_mode=False
     )
+
+
+@pytest.fixture(name="fast_args")
+def fast_args_fixture(cli_args, monkeypatch):
+    """Timings short enough to watch a unit be declared gone and rebuilt"""
+    cli_args.response_timeout = 0.2
+    cli_args.polling_interval = 0.1
+    cli_args.discovery_timeout = 0
+    monkeypatch.setattr(manager_module, "UNRESPONSIVE_AFTER", 2)
+    return cli_args
 
 
 @pytest.fixture(name="device")

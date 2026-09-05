@@ -98,3 +98,44 @@ def test_an_unreachable_device_reports_service_unavailable(client, manager, devi
     response = client.patch(f"/devices/{MAC}", json={"target_temperature": 28})
 
     assert response.status_code == 503
+
+
+def test_a_successful_command_is_acknowledged_over_websocket(client, manager):
+    """A command that lands gets an 'applied' reply, not silence"""
+    manager.view_models[MAC] = models.create_view_model()
+
+    with client.websocket_connect("/ws") as socket:
+        assert socket.receive_json()["type"] == "list"
+        socket.send_json({"type": "update", "mac": MAC, "message_id": "m1", "data": {"target_temperature": 24}})
+        reply = socket.receive_json()
+
+    assert reply["type"] == "applied"
+    assert reply["mac"] == MAC
+    assert reply["message_id"] == "m1"
+
+
+def test_an_unchanged_command_still_reports_not_changed(client, manager):
+    """The existing not_changed reply is unaffected"""
+    manager.view_models[MAC] = models.create_view_model()
+
+    with client.websocket_connect("/ws") as socket:
+        assert socket.receive_json()["type"] == "list"
+        socket.send_json({"type": "update", "mac": MAC, "message_id": "m2", "data": {"target_temperature": 21}})
+        reply = socket.receive_json()
+
+    assert reply["type"] == "not_changed"
+    assert reply["message_id"] == "m2"
+
+
+def test_a_client_joining_during_an_outage_is_told(client, manager):
+    """Availability is announced on change, so a late client needs catching up"""
+    manager.view_models[MAC] = models.create_view_model()
+    manager.unavailable[MAC] = "no_response"
+
+    with client.websocket_connect("/ws") as socket:
+        assert socket.receive_json()["type"] == "list"
+        notice = socket.receive_json()
+
+    assert notice["type"] == "availability"
+    assert notice["mac"] == MAC
+    assert notice["data"] == {"available": False, "reason": "no_response"}

@@ -28,6 +28,12 @@ UNRESPONSIVE_AFTER = 5
 # reading is sensor noise, not a change worth telling anyone about.
 JITTER_WINDOW = 60
 
+# Why a device is not available. Sent to clients so they can tell a unit that
+# has gone quiet from one that is no longer on the network at all.
+NO_RESPONSE = "no_response"
+REMOVED = "removed"
+RECOVERED = "recovered"
+
 
 class ConnectionManager:
     """Manages WebSocket connections and broadcasting messages to clients"""
@@ -88,6 +94,43 @@ class GreeClimateManager:
         self.view_models: Dict[MacAddress, DeviceViewModel] = {}
         self.measurement_timestamps: Dict[MacAddress, float] = {}
         self.polling_tasks: Dict[MacAddress, asyncio.Task] = {}
+        self.unavailable: Dict[MacAddress, str] = {}
+
+    # Availability
+
+    def availability_message(self, mac: MacAddress) -> dict:
+        """How a device's current availability reads on the wire"""
+        reason = self.unavailable.get(mac)
+        return {
+            "type": "availability",
+            "mac": mac,
+            "data": {"available": reason is None, "reason": reason or RECOVERED},
+        }
+
+    async def _announce_unavailable(self, mac: MacAddress, reason: str) -> None:
+        """Tell clients a device can no longer be relied on, once per outage"""
+        if self.unavailable.get(mac) == reason:
+            return
+
+        self.unavailable[mac] = reason
+        logger.info("Device %s is unavailable (%s)", mac, reason)
+        await self._announce(self.availability_message(mac))
+
+    async def _announce_available(self, mac: MacAddress) -> None:
+        """Tell clients a device is usable again, only if it was not"""
+        if mac not in self.unavailable:
+            return
+
+        del self.unavailable[mac]
+        logger.info("Device %s is available again", mac)
+        await self._announce(self.availability_message(mac))
+
+    async def _announce(self, message: dict) -> None:
+        """Broadcast a message, never letting a client failure reach the caller"""
+        try:
+            await self.connection_manager.broadcast(message)
+        except Exception as e:
+            logger.error("Failed to broadcast %s: %s", message.get("type"), e)
 
     # Discovery and the device roster
 
@@ -119,6 +162,7 @@ class GreeClimateManager:
         # Units that neither answered the broadcast nor our last requests are gone.
         for mac in [m for m in self.devices if m not in found and not self._is_responsive(m)]:
             logger.info("Device %s no longer answers and was not rediscovered, dropping it", mac)
+            await self._announce_unavailable(mac, REMOVED)
             self._forget_device(mac)
 
         # Units are independent, so bind them at the same time rather than
@@ -203,6 +247,7 @@ class GreeClimateManager:
         self.view_models.pop(mac, None)
         self.measurement_timestamps.pop(mac, None)
         self.missed_responses.pop(mac, None)
+        self.unavailable.pop(mac, None)
 
     async def _recover_device(self, mac: MacAddress) -> bool:
         """Rebuild a unit that stopped answering.
@@ -229,9 +274,12 @@ class GreeClimateManager:
             logger.info("Rebuilding device %s at %s", mac, device_info.ip)
             await self._bind_device(device_info)
 
-        return self._is_responsive(mac) and self.devices.get(mac) is not old
+        recovered = self._is_responsive(mac) and self.devices.get(mac) is not old
+        if recovered:
+            await self._announce_available(mac)
+        return recovered
 
-    def _record_response(self, mac: MacAddress, answered: bool) -> None:
+    async def _record_response(self, mac: MacAddress, answered: bool) -> None:
         """Track whether a unit is still talking to us, and say so once"""
         missed = self.missed_responses.get(mac, 0)
 
@@ -239,9 +287,12 @@ class GreeClimateManager:
             if missed:
                 logger.info("Device %s is answering again after %d missed requests", mac, missed)
             self.missed_responses[mac] = 0
+            await self._announce_available(mac)
             return
 
         self.missed_responses[mac] = missed + 1
+        if self.missed_responses[mac] >= UNRESPONSIVE_AFTER:
+            await self._announce_unavailable(mac, NO_RESPONSE)
         if missed == 0:
             device = self.devices.get(mac)
             silence = device.silent_for if device else None
@@ -267,10 +318,10 @@ class GreeClimateManager:
                 answered = await device.refresh_state(self.args.response_timeout)
             except (DeviceNotBoundError, DeviceTimeoutError) as e:
                 logger.error("Failed to update device %s: %s", mac, e)
-                self._record_response(mac, False)
+                await self._record_response(mac, False)
                 return self.view_models.get(mac, view_model)
 
-            self._record_response(mac, answered)
+            await self._record_response(mac, answered)
             if not answered:
                 # Nothing new arrived, so keep reporting the last known state
                 # rather than republishing a stale read as if it were fresh.

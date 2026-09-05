@@ -118,3 +118,24 @@ def test_the_view_model_validates_what_is_assigned_to_it():
         view.ip = "definitely.not.an.ip"
     with pytest.raises(pydantic.ValidationError):
         view.current_temperature = "hot"  # type: ignore[assignment]  # deliberately wrong
+
+
+@pytest.mark.asyncio
+async def test_a_flag_the_unit_never_reports_is_null(manager, device):
+    """An absent flag reads as unknown, not as switched off.
+
+    The fields are declared Optional because not every unit supports them all;
+    coercing an absent one to False would claim the feature exists and is off.
+    """
+    silent = mock_state()
+    del silent["Air"]  # fresh air
+    del silent["Health"]  # anion
+    device.state = silent
+    device._properties.pop("Air")
+    device._properties.pop("Health")
+
+    view = await manager.device_view(MAC)
+
+    assert view.fresh_air is None
+    assert view.anion is None
+    assert view.xfan is False, "a flag the unit does report is still a boolean"

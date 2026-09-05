@@ -18,6 +18,11 @@ RUN chmod +x entrypoint.sh
 COPY gree_ws/ gree_ws/
 COPY main.py .
 
+# The application needs no privileges: it listens above 1024 and its UDP
+# broadcast only needs SO_BROADCAST, not a raw socket.
+RUN useradd --create-home --uid 10001 gree
+USER gree
+
 # Expose port
 ENV PORT=8123
 EXPOSE 8123

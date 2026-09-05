@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from gree_ws.manager import GreeClimateManager
-from conftest import FAKE_KEY, MAC, FakeDevice, device_info, mock_state
+from conftest import FAKE_KEY, MAC, FakeDevice, capture_broadcasts, device_info, mock_state
 
 
 @pytest.fixture(name="discovered")
@@ -36,12 +36,7 @@ async def test_polling_broadcasts_state_changes(discovered):
     climate_manager, created = discovered
     await climate_manager.discover_devices()
 
-    broadcasts: list = []
-
-    async def capture(data):
-        broadcasts.append(data)
-
-    climate_manager.connection_manager.broadcast = capture
+    broadcasts = capture_broadcasts(climate_manager)
     created[0].state = mock_state(SetTem=24)
 
     await asyncio.sleep(climate_manager.args.polling_interval + 1)

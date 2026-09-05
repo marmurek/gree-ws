@@ -148,6 +148,11 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 )
             )
 
+            # Availability is announced on change, so a client joining during an
+            # outage would otherwise never hear about it.
+            for mac in list(climate_manager.unavailable):
+                await websocket.send_text(json.dumps(climate_manager.availability_message(mac)))
+
             while True:
                 await _handle_ws_message(websocket, climate_manager)
 
@@ -194,7 +199,15 @@ async def _handle_ws_message(websocket: WebSocket, climate_manager: GreeClimateM
 
         command = DeviceUpdateModel(**message.get("data", {}))
 
-        if not await climate_manager.send_update(mac, command):
+        if await climate_manager.send_update(mac, command):
+            await _send_ws(
+                websocket,
+                type="applied",
+                mac=mac,
+                message_id=message_id,
+                message="Command applied and acknowledged by the device",
+            )
+        else:
             await _send_ws(
                 websocket,
                 type="not_changed",

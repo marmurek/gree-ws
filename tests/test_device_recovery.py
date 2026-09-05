@@ -20,16 +20,6 @@ from conftest import MAC, device_info, mock_state
 # pylint: disable=protected-access
 
 
-@pytest.fixture(name="fast_args")
-def fast_args_fixture(cli_args, monkeypatch):
-    """Timings short enough to watch a unit be declared gone and rebuilt"""
-    cli_args.response_timeout = 0.2
-    cli_args.polling_interval = 0.1
-    cli_args.discovery_timeout = 0
-    monkeypatch.setattr(manager_module, "UNRESPONSIVE_AFTER", 2)
-    return cli_args
-
-
 @pytest.mark.asyncio
 async def test_a_silent_unit_is_rebuilt(fast_args, discovery):
     """The polling loop notices sustained silence and builds a new device"""

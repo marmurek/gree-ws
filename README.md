@@ -76,7 +76,18 @@ If the command had an effect, you will soon receive a `report` message; otherwis
 
 If the request carries a `message_id`, the same value is echoed back on the `not_changed` and `error` replies, so a client can match a response to its request. `report` messages are broadcast to every client and carry no `message_id`.
 
-#### 4. No change
+#### 4. Command applied
+Sent when the command reached the device and it acknowledged the change.
+```json
+{
+  "type": "applied",
+  "mac": "aabbccddeeff",
+  "message_id": "abc-123",
+  "message": "Command applied and acknowledged by the device"
+}
+```
+
+#### 5. No change
 Sent when the command did not change anything on the device.
 ```json
 {
@@ -87,7 +98,23 @@ Sent when the command did not change anything on the device.
 }
 ```
 
-#### 5. Errors
+#### 6. Device availability
+Sent when a device stops answering, when it starts answering again, and when it is dropped from the device list. A client that connects during an outage receives one of these for every unavailable device, right after the initial `list`.
+```json
+{
+  "type": "availability",
+  "mac": "aabbccddeeff",
+  "data": {
+    "available": false,
+    "reason": "no_response"
+  }
+}
+```
+`reason` is `no_response` when the unit stopped answering, `removed` when it was dropped from the list, and `recovered` when it came back.
+
+While a device is unavailable its last known state keeps being served; it is not refreshed and not reported as changing.
+
+#### 7. Errors
 ```json
 {
   "type": "error",
@@ -103,6 +130,7 @@ Full schemas are in [/docs](http://localhost:8123/docs); these two do not behave
 
 - **`buzzer`** - whether the unit beeps when it receives a command. It is not stored on the air conditioner: it lives in the application's memory, defaults to enabled and goes back to enabled after a restart or a `POST /discover`. Send `"buzzer": false` to silence the unit.
 - **`target_humidity`** - the device encodes it as `(value - 15) / 5`, so only multiples of 5 in the 30-80 range are accepted; anything else is rejected with `422`. Units without a dehumidifier report no usable value and are reported as `null`.
+- **The optional flags** (`turbo`, `quiet`, `light`, `fresh_air`, `xfan`, `anion`, `sleep`, `power_save`, `steady_heat`, `clean_filter`, `water_full`) are `null` when the unit does not report them at all, rather than `false`. Not every model supports every feature.
 
 ## 🛠️ Build and run in docker
 

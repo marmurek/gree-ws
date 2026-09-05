@@ -52,9 +52,13 @@ class DeviceField:
         setattr(device, self.name, self.to_device(value))  # type: ignore[misc]
 
 
-def _as_bool(value: Any) -> bool:
-    """Report a flag the way the device means it, absent counting as off"""
-    return bool(value)
+def _as_bool(value: Any) -> Optional[bool]:
+    """Report a flag, distinguishing off from never reported.
+
+    These fields are declared Optional because a unit need not support them all.
+    Coercing an absent one to False would claim the feature exists and is off.
+    """
+    return None if value is None else bool(value)
 
 
 def _settable_humidity(value: Any) -> Optional[int]:
