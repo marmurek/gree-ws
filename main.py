@@ -5,7 +5,6 @@ import argparse
 import re
 from typing import Dict, Optional, Set, List, Annotated
 from enum import Enum
-from threading import Lock
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, status
@@ -210,37 +209,46 @@ class ConnectionManager:
 
     def __init__(self, args: argparse.Namespace):
         self.active_connections: Set[WebSocket] = set()
-        self.lock = Lock()
         self.args = args
 
     async def connect(self, websocket: WebSocket):
         """Accept a WebSocket connection and start tracking it"""
         await websocket.accept()
-        with self.lock:
-            self.active_connections.add(websocket)
+        self.active_connections.add(websocket)
 
     def disconnect(self, websocket: WebSocket):
         """Stop tracking a WebSocket connection"""
-        with self.lock:
-            if websocket in self.active_connections:
-                self.active_connections.remove(websocket)
+        self.active_connections.discard(websocket)
+
+    async def _send_to(self, connection: WebSocket, payload: str) -> Optional[WebSocket]:
+        """Send one payload, returning the connection if it has to be dropped"""
+        try:
+            await connection.send_text(payload)
+        except (WebSocketDisconnect, RuntimeError):
+            # The connection is closed or invalid
+            return connection
+        except Exception as e:
+            client_host = connection.client.host if connection.client else "unknown"
+            logger.error("Error sending data to WebSocket %s: %s", client_host, e)
+        return None
 
     async def broadcast(self, data: dict):
         """Send data to every connected client, dropping the ones that went away"""
-        disconnected = set()
-        with self.lock:
-            for connection in self.active_connections:
-                try:
-                    await connection.send_text(json.dumps(data))
-                except (WebSocketDisconnect, RuntimeError):
-                    # If the connection is closed or invalid, remove it
-                    disconnected.add(connection)
-                except Exception as e:
-                    client_host = connection.client.host if connection.client else "unknown"
-                    logger.error("Error sending data to WebSocket %s: %s", client_host, e)
+        payload = json.dumps(data)
 
-            for conn in disconnected:
-                self.active_connections.discard(conn)
+        # Iterate a snapshot, never the live set: a client connecting or leaving
+        # during the sends would otherwise mutate it mid-iteration. No lock is
+        # needed around the set itself - the event loop is single threaded and
+        # none of the mutations here await, so each one is already atomic.
+        connections = list(self.active_connections)
+        if not connections:
+            return
+
+        results = await asyncio.gather(*(self._send_to(c, payload) for c in connections))
+
+        for connection in results:
+            if connection is not None:
+                self.active_connections.discard(connection)
 
 
 def create_view_model() -> DeviceViewModel:
@@ -732,7 +740,9 @@ async def websocket_endpoint(websocket: WebSocket):
             message_id = message.get("message_id")
 
             try:
-                if message.get("type") == "update":
+                message_type = message.get("type")
+
+                if message_type == "update":
                     mac = message.get("mac")
                     if not mac or mac not in climate_manager.view_models:
                         await websocket.send_text(
@@ -757,10 +767,27 @@ async def websocket_endpoint(websocket: WebSocket):
                                 }
                             )
                         )
+                else:
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "error",
+                                "message_id": message_id,
+                                "message": f"Unsupported message type: {message_type}",
+                            }
+                        )
+                    )
+            except WebSocketDisconnect:
+                # The client went away, there is nobody left to report the error to
+                raise
             except Exception as e:
                 await websocket.send_text(json.dumps({"type": "error", "message_id": message_id, "message": str(e)}))
 
     except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected")
+    finally:
+        # Runs for a clean disconnect and for any unexpected error alike, so a
+        # dead connection is never left behind in the broadcast set.
         climate_manager.connection_manager.disconnect(websocket)
 
 
