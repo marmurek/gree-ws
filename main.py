@@ -13,7 +13,7 @@ from pydantic import BaseModel, StringConstraints, Field
 import uvicorn
 
 from greeclimate.discovery import Discovery
-from greeclimate.device import Device, HorizontalSwing, VerticalSwing, Mode, FanSpeed
+from greeclimate.device import Device, HorizontalSwing, VerticalSwing, Mode, FanSpeed, HUMIDITY_MIN, HUMIDITY_MAX
 from greeclimate.exceptions import DeviceNotBoundError, DeviceTimeoutError
 
 def pascal_to_snake(name):
@@ -54,6 +54,10 @@ def from_device_enum(device_enum_value, target_enum_cls):
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# The device stores the target humidity as (value - 15) / 5, so only multiples of 5
+# survive a write/read round trip. HUMIDITY_MIN/HUMIDITY_MAX come from greeclimate.
+HUMIDITY_STEP = 5
 
 # Pydantic models for API
 type MacAddress = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{12}$"),]
@@ -109,7 +113,10 @@ class DeviceViewModel(BaseModel):
     current_temperature: Optional[int] = Field(None, description="Current temperature reported by the device")
     target_temperature: int = Field(16, description="Target temperature set on the device")
     current_humidity: Optional[int] = Field(None, description="Current humidity reported by the device")
-    target_humidity: Optional[int] = Field(None, description="Target humidity set on the device")
+    target_humidity: Optional[int] = Field(
+        None,
+        description=f"Target humidity set on the device ({HUMIDITY_MIN}-{HUMIDITY_MAX}, step {HUMIDITY_STEP}), null when the device does not report a settable value"
+    )
     fan_speed: DeviceFanSpeed = Field(DeviceFanSpeed.auto, description="Fan speed setting of the device")
     horizontal_swing: DeviceHorizontalSwing = Field(DeviceHorizontalSwing.default, description="Horizontal swing setting of the device")
     vertical_swing: DeviceVerticalSwing = Field(DeviceVerticalSwing.default, description="Vertical swing setting of the device")
@@ -121,7 +128,7 @@ class DeviceViewModel(BaseModel):
     anion: Optional[bool] = Field(None, description="Anion mode state")
     sleep: Optional[bool] = Field(None, description="Sleep mode state")
     power_save: Optional[bool] = Field(None, description="Power save mode state")
-    beep: Optional[bool] = Field(None, description="Beep sound state")
+    buzzer: Optional[bool] = Field(None, description="Buzzer state, when disabled the unit does not beep on each command")
     clean_filter: Optional[bool] = Field(None, description="Clean filter indicator state")
     water_full: Optional[bool] = Field(None, description="Water full indicator state")
     steady_heat: Optional[bool] = Field(None, description="Steady heat mode state")
@@ -139,10 +146,11 @@ class DeviceUpdateModel(BaseModel):
     )
     target_humidity: Optional[int] = Field(
         None,
-        ge=40,
-        le=90,
-        description="Target humidity (40-90, step 1) to set",
-        json_schema_extra={"step": 1}
+        ge=HUMIDITY_MIN,
+        le=HUMIDITY_MAX,
+        multiple_of=HUMIDITY_STEP,
+        description=f"Target humidity ({HUMIDITY_MIN}-{HUMIDITY_MAX}, step {HUMIDITY_STEP}) to set",
+        json_schema_extra={"step": HUMIDITY_STEP}
     )
     fan_speed: Optional[DeviceFanSpeed] = Field(None, description="Fan speed setting of the device to set")
     horizontal_swing: Optional[DeviceHorizontalSwing] = Field(None, description="Horizontal swing setting of the device to set")
@@ -155,7 +163,7 @@ class DeviceUpdateModel(BaseModel):
     anion: Optional[bool] = None
     sleep: Optional[bool] = None
     power_save: Optional[bool] = None
-    beep: Optional[bool] = None
+    buzzer: Optional[bool] = Field(None, description="Buzzer state to set, set to false to silence the beep on each command")
     steady_heat: Optional[bool] = None
 
 class RootResponse(BaseModel):
@@ -207,7 +215,7 @@ def create_view_model() -> DeviceViewModel:
             current_temperature=None,
             target_temperature=16,
             current_humidity=None,
-            target_humidity=40,
+            target_humidity=None,
             fan_speed=DeviceFanSpeed.auto,
             horizontal_swing=DeviceHorizontalSwing.default,
             vertical_swing=DeviceVerticalSwing.default,
@@ -219,7 +227,7 @@ def create_view_model() -> DeviceViewModel:
             anion=None,
             sleep=None,
             power_save=None,
-            beep=None,
+            buzzer=None,
             clean_filter=None,
             water_full=None,
             steady_heat=None,
@@ -318,7 +326,9 @@ class GreeClimateManager:
             view_model.target_temperature = device.target_temperature
         if device.current_humidity is not None:
             view_model.current_humidity = device.current_humidity
-        if device.target_humidity is not None:
+        # Devices without a dehumidifier report Dwet=0, which the library decodes as 15 -
+        # a value the device would refuse, so report it as "not available" instead.
+        if device.target_humidity is not None and HUMIDITY_MIN <= device.target_humidity <= HUMIDITY_MAX:
             view_model.target_humidity = device.target_humidity
         if device.fan_speed is not None:
             view_model.fan_speed = to_device_enum(FanSpeed(device.fan_speed), DeviceFanSpeed)
@@ -342,8 +352,8 @@ class GreeClimateManager:
             view_model.sleep = bool(device.sleep)
         if hasattr(device, 'power_save'):
             view_model.power_save = bool(device.power_save)
-        if hasattr(device, 'beep'):
-            view_model.beep = bool(device.beep)
+        if hasattr(device, 'buzzer'):
+            view_model.buzzer = bool(device.buzzer)
         if hasattr(device, 'clean_filter'):
             view_model.clean_filter = bool(device.clean_filter)
         if hasattr(device, 'water_full'):
@@ -503,9 +513,9 @@ class GreeClimateManager:
         if data.power_save is not None:
             modified = device.power_save != data.power_save or modified
             device.power_save = data.power_save
-        if data.beep is not None:
-            modified = device.beep != data.beep or modified
-            device.beep = data.beep
+        if data.buzzer is not None:
+            modified = device.buzzer != data.buzzer or modified
+            device.buzzer = data.buzzer
         if data.steady_heat is not None:
             modified = device.steady_heat != data.steady_heat or modified
             device.steady_heat = data.steady_heat
@@ -564,7 +574,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Gree Climate API",
     description="REST and WebSocket API for controlling Gree air conditioners with real-time state monitoring",
-    version="1.2.0",
+    version="2.0.0",
     lifespan=lifespan
 )
 

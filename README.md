@@ -5,8 +5,6 @@ Advanced REST and WebSocket API for controlling Gree air conditioners with real-
 
 **Note**: This API requires Gree devices configured in local mode. Not all features may be available for all air conditioner models.
 
-**Note**: For now, the application uses custom patches to the `greeclimate` library. The patches are taken from the `greeclimate` repository pull requests.
-
 ## ✨ Features
 
 - **Automatic device discovery** - Scans the network for Gree air conditioners on startup and on demand

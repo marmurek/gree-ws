@@ -5,7 +5,6 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
-    patchutils \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -13,14 +12,8 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY patches/ patches/
-COPY apply_patches.sh .
 COPY entrypoint.sh .
-
-# Apply patches
-RUN chmod +x apply_patches.sh && \
-    chmod +x entrypoint.sh && \
-    ./apply_patches.sh
+RUN chmod +x entrypoint.sh
 
 COPY main.py .
 
