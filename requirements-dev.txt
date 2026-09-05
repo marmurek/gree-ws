@@ -1,0 +1,5 @@
+# Developer tooling, not needed at runtime or in the Docker image.
+# Install on top of requirements.txt:  pip install -r requirements-dev.txt
+black==26.5.1
+mypy==2.3.1
+pylint==4.0.8
