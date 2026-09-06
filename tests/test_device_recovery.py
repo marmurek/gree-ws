@@ -12,7 +12,7 @@ import asyncio
 import pytest
 from gree_ws.errors import DeviceUnavailable
 
-from gree_ws import manager as manager_module, models
+from gree_ws import models
 from gree_ws.manager import GreeClimateManager
 from conftest import MAC, device_info, mock_state
 
@@ -86,28 +86,6 @@ async def test_a_working_unit_is_not_rebound_on_rediscovery(fast_args, discovery
 
     assert manager.devices[MAC] is original
     assert len(created) == 1
-
-
-@pytest.mark.asyncio
-async def test_a_unit_that_vanished_and_is_silent_is_dropped(fast_args, discovery):
-    """A unit that neither answers nor reappears is forgotten entirely"""
-    infos = [device_info()]
-    created = discovery(infos)
-    manager = GreeClimateManager(fast_args)
-    await manager.discover_devices()
-
-    created[0].alive = False
-    manager.missed_responses[MAC] = manager_module.UNRESPONSIVE_AFTER
-    infos.clear()  # it does not answer the broadcast either
-
-    macs = await manager.discover_devices()
-    await manager.stop_polling()
-
-    assert macs == []
-    assert MAC not in manager.devices
-    assert MAC not in manager.view_models
-    assert MAC not in manager.missed_responses
-    assert MAC not in manager.polling_tasks
 
 
 @pytest.mark.asyncio

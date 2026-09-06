@@ -127,15 +127,26 @@ def test_an_unchanged_command_still_reports_not_changed(client, manager):
     assert reply["message_id"] == "m2"
 
 
-def test_a_client_joining_during_an_outage_is_told(client, manager):
-    """Availability is announced on change, so a late client needs catching up"""
-    manager.view_models[MAC] = models.create_view_model()
-    manager.unavailable[MAC] = "no_response"
+def test_a_client_joining_during_an_outage_sees_it_in_the_list(client, manager):
+    """Availability is part of the device, so the initial list already carries it"""
+    offline = models.create_view_model()
+    offline.mac = MAC
+    offline.available = False
+    manager.view_models[MAC] = offline
 
     with client.websocket_connect("/ws") as socket:
-        assert socket.receive_json()["type"] == "list"
-        notice = socket.receive_json()
+        listing = socket.receive_json()
 
-    assert notice["type"] == "availability"
-    assert notice["mac"] == MAC
-    assert notice["data"] == {"available": False, "reason": "no_response"}
+    assert listing["type"] == "list"
+    assert listing["data"][0]["available"] is False
+
+
+def test_the_rest_view_carries_availability(client, manager):
+    """The same field is served over REST"""
+    view = models.create_view_model()
+    view.mac = MAC
+    view.available = True
+    manager.view_models[MAC] = view
+
+    assert client.get(f"/devices/{MAC}").json()["available"] is True
+    assert client.get("/devices").json()[0]["available"] is True

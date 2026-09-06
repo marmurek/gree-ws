@@ -11,7 +11,7 @@ Advanced REST and WebSocket API for controlling Gree air conditioners with real-
 - **WebSocket** - Real-time communication with clients
 - **State monitoring** - Automatic polling at a specified interval
 - **Change notifications** - Instant notifications about state changes via WebSocket
-- **Error handling** - Detects units that stop answering, rebuilds them and follows a changed IP address
+- **Error handling** - Detects units that stop answering, reports them as unavailable, rebuilds them and follows a changed IP address
 - **Configurable** - Every setting in one YAML file, overridable from the environment
 - **Optional authorisation** - Shared token on REST and WebSocket, off by default
 
@@ -175,23 +175,7 @@ Sent when the command did not change anything on the device.
 }
 ```
 
-#### 6. Device availability
-Sent when a device stops answering, when it starts answering again, and when it is dropped from the device list. A client that connects during an outage receives one of these for every unavailable device, right after the initial `list`.
-```json
-{
-  "type": "availability",
-  "mac": "aabbccddeeff",
-  "data": {
-    "available": false,
-    "reason": "no_response"
-  }
-}
-```
-`reason` is `no_response` when the unit stopped answering, `removed` when it was dropped from the list, and `recovered` when it came back.
-
-While a device is unavailable its last known state keeps being served; it is not refreshed and not reported as changing.
-
-#### 7. Errors
+#### 6. Errors
 ```json
 {
   "type": "error",
@@ -203,9 +187,18 @@ The `message_id` field is absent when the request could not be parsed as JSON.
 
 ## 🌡️ Device fields worth knowing
 
-Full schemas are in [/docs](http://localhost:8123/docs); these two do not behave the way the names suggest.
+Full schemas are in [/docs](http://localhost:8123/docs); these do not behave the way the names suggest.
 
 - **`buzzer`** - whether the unit beeps when it receives a command. It is not stored on the air conditioner: it lives in the application's memory, defaults to enabled and goes back to enabled after a restart or a `POST /discover`. Send `"buzzer": false` to silence the unit.
+- **`available`** - whether the device is currently answering. It is an ordinary field, so it is served by `/devices` like any other value and a change is reported through the usual `report` message:
+  ```json
+  {
+    "type": "report",
+    "mac": "aabbccddeeff",
+    "data": { "available": { "old": true, "new": false } }
+  }
+  ```
+  A device that stops answering is **not** removed from the list. It stays with `available: false` and every other field holding the last state it reported, which may be out of date. The application keeps polling it and periodically rebuilds the connection, so a unit that was switched off comes back by itself, following a changed IP address if it got one.
 - **`target_humidity`** - the device encodes it as `(value - 15) / 5`, so only multiples of 5 in the 30-80 range are accepted; anything else is rejected with `422`. Units without a dehumidifier report no usable value and are reported as `null`.
 - **The optional flags** (`turbo`, `quiet`, `light`, `fresh_air`, `xfan`, `anion`, `sleep`, `power_save`, `steady_heat`, `clean_filter`, `water_full`) are `null` when the unit does not report them at all, rather than `false`. Not every model supports every feature.
 

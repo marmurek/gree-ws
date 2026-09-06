@@ -162,11 +162,6 @@ def create_app(settings: Settings) -> FastAPI:
                 )
             )
 
-            # Availability is announced on change, so a client joining during an
-            # outage would otherwise never hear about it.
-            for mac in list(climate_manager.unavailable):
-                await websocket.send_text(json.dumps(climate_manager.availability_message(mac)))
-
             while True:
                 await _handle_ws_message(websocket, climate_manager)
 

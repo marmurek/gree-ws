@@ -79,6 +79,13 @@ class DeviceViewModel(BaseModel):
 
     mac: MacAddress = Field("000000000000", description="MAC address of the device")
     ip: IpAddress = Field("0.0.0.0", description="IP address of the device")
+    available: bool = Field(
+        False,
+        description=(
+            "Whether the device is currently answering. While it is false the remaining fields hold the last "
+            "state the device reported, which may be out of date."
+        ),
+    )
     power: bool = Field(False, description="Power state of the device")
     mode: DeviceMode = Field(DeviceMode.auto, description="Operating mode of the device")
     current_temperature: Optional[int] = Field(None, description="Current temperature reported by the device")
