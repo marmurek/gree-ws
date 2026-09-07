@@ -96,11 +96,11 @@ class DeviceViewModel(BaseModel):
         description=f"Target humidity set on the device ({HUMIDITY_MIN}-{HUMIDITY_MAX}, step {HUMIDITY_STEP}), null when the device does not report a settable value",
     )
     fan_speed: DeviceFanSpeed = Field(DeviceFanSpeed.auto, description="Fan speed setting of the device")
-    horizontal_swing: DeviceHorizontalSwing = Field(
-        DeviceHorizontalSwing.default, description="Horizontal swing setting of the device"
+    horizontal_swing: Optional[DeviceHorizontalSwing] = Field(
+        None, description="Horizontal swing setting of the device, null when the device does not report one"
     )
-    vertical_swing: DeviceVerticalSwing = Field(
-        DeviceVerticalSwing.default, description="Vertical swing setting of the device"
+    vertical_swing: Optional[DeviceVerticalSwing] = Field(
+        None, description="Vertical swing setting of the device, null when the device does not report one"
     )
     turbo: Optional[bool] = Field(None, description="Turbo mode state")
     quiet: Optional[bool] = Field(None, description="Quiet mode state")

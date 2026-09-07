@@ -139,3 +139,38 @@ async def test_a_flag_the_unit_never_reports_is_null(manager, device):
     assert view.fresh_air is None
     assert view.anion is None
     assert view.xfan is False, "a flag the unit does report is still a boolean"
+
+
+@pytest.mark.asyncio
+async def test_a_swing_the_unit_never_reports_is_null(manager, device):
+    """A unit without a swing axis reports nothing for it, not a default position.
+
+    Many models move air in one plane only. Reporting 'default' there was
+    indistinguishable from a unit that has the axis and has it set to default.
+    """
+    silent = mock_state()
+    del silent["SwingLfRig"]  # horizontal
+    device.state = silent
+    device._properties.pop("SwingLfRig")
+
+    view = await manager.device_view(MAC)
+
+    assert view.horizontal_swing is None
+    assert view.vertical_swing is DeviceVerticalSwing.default, "the axis it does report is unaffected"
+
+
+@pytest.mark.asyncio
+async def test_setting_a_swing_the_unit_never_reported_is_a_change(manager, device):
+    """Asking for a position where there was none counts as a change"""
+    from gree_ws.models import DeviceUpdateModel  # pylint: disable=import-outside-toplevel
+
+    silent = mock_state()
+    del silent["SwUpDn"]
+    device.state = silent
+    device._properties.pop("SwUpDn")
+    await manager.device_view(MAC)
+
+    modified = await manager.send_update(MAC, DeviceUpdateModel(vertical_swing=DeviceVerticalSwing.full_swing))
+
+    assert modified is True
+    assert device.last_command()["SwUpDn"] == 1

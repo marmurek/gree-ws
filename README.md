@@ -212,6 +212,7 @@ Full schemas are in [/docs](http://localhost:8123/docs); these do not behave the
   A device that stops answering is **not** removed from the list. It stays with `available: false` and every other field holding the last state it reported, which may be out of date. The application keeps polling it and periodically rebuilds the connection, so a unit that was switched off comes back by itself, following a changed IP address if it got one.
 - **`target_humidity`** - the device encodes it as `(value - 15) / 5`, so only multiples of 5 in the 30-80 range are accepted; anything else is rejected with `422`. Units without a dehumidifier report no usable value and are reported as `null`.
 - **The optional flags** (`turbo`, `quiet`, `light`, `fresh_air`, `xfan`, `anion`, `sleep`, `power_save`, `steady_heat`, `clean_filter`, `water_full`) are `null` when the unit does not report them at all, rather than `false`. Not every model supports every feature.
+- **`horizontal_swing` and `vertical_swing`** are `null` on the same terms. Many models move air in one plane only, and reporting `default` for the missing axis was indistinguishable from a unit that has it and has it set to default. A client can use this to hide a control the unit does not have.
 
 ## 🛠️ Build and run in docker
 
