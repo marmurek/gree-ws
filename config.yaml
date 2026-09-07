@@ -5,6 +5,11 @@
 # Point the application at a different file with:  python3 main.py --config other.yaml
 
 server:
+  # Interface the API listens on. 0.0.0.0 means every interface, which on a home
+  # network means every device on it can reach the API. Narrow it to a single
+  # address, or to 127.0.0.1 for local access only, if you would rather not
+  # enable authorisation below.
+  host: "0.0.0.0"
   # Port the HTTP and WebSocket API listens on.
   port: 8123
   # Reload the application when the sources change. For development only.

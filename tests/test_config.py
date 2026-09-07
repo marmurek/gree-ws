@@ -27,6 +27,7 @@ def test_settings_come_from_the_file(tmp_path):
         tmp_path,
         """
         server:
+          host: "10.0.0.5"
           port: 9000
           dev_mode: true
         discovery:
@@ -44,6 +45,7 @@ def test_settings_come_from_the_file(tmp_path):
 
     settings = load_settings(path)
 
+    assert settings.host == "10.0.0.5"
     assert settings.port == 9000
     assert settings.dev_mode is True
     assert settings.discovery_timeout == 7
@@ -216,3 +218,23 @@ def test_a_token_without_authorisation_is_reported(tmp_path, caplog):
 
     assert settings.auth.enabled is False
     assert "open to anyone" in caplog.text
+
+
+def test_the_listening_interface_defaults_to_every_one(tmp_path):
+    """Leaving host out keeps the previous behaviour"""
+    assert load_settings(str(tmp_path / "absent.yaml")).host == "0.0.0.0"
+
+
+def test_the_listening_interface_can_come_from_the_environment(tmp_path, monkeypatch):
+    """HOST overrides the file like every other setting"""
+    path = write_config(tmp_path, 'server:\n  host: "10.0.0.5"\n')
+    monkeypatch.setenv("HOST", "127.0.0.1")
+
+    assert load_settings(path).host == "127.0.0.1"
+
+
+def test_a_blank_interface_is_refused(tmp_path):
+    """An empty host would be ambiguous rather than meaningful"""
+    path = write_config(tmp_path, 'server:\n  host: ""\n')
+
+    assert load_settings(path).host == Settings().host

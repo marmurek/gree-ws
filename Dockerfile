@@ -32,14 +32,15 @@ EXPOSE 8123
 # Settings live in config.yaml. Every one of them can be overridden by an
 # environment variable, which is how to configure the container without
 # mounting a file:
-#   PORT  DISCOVERY_TIMEOUT  POLLING_INTERVAL  RESPONSE_TIMEOUT  VERBOSE
+#   HOST  PORT  DISCOVERY_TIMEOUT  POLLING_INTERVAL  RESPONSE_TIMEOUT  VERBOSE
 #   AUTH_ENABLED  AUTH_TOKEN  CONFIG_FILE
 
-# Health check. The port is resolved the same way the application resolves it,
-# so the probe follows the configuration file as well as the environment.
+# Health check. The address is resolved the same way the application resolves
+# it, so the probe follows the configuration file as well as the environment,
+# including an interface narrower than every one.
 # /health stays reachable without a token, so this works with auth enabled.
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD ["sh", "-c", "curl -fsS \"http://localhost:$(python3 -m gree_ws.port)/health\""]
+    CMD ["sh", "-c", "curl -fsS \"http://$(python3 -m gree_ws.probe)/health\""]
 
 # Run the application
 ENTRYPOINT ["./entrypoint.sh"]

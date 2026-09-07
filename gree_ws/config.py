@@ -26,6 +26,7 @@ class AuthSettings:
 class Settings:
     """Everything the application can be configured with"""
 
+    host: str = "0.0.0.0"
     port: int = 8123
     dev_mode: bool = False
     discovery_timeout: int = 3
@@ -66,6 +67,14 @@ def _within(minimum: float, maximum: Optional[float], cast: Callable[[Any], Any]
         return result
 
     return convert
+
+
+def _text(value: Any) -> str:
+    """A setting that has to be a non-empty string"""
+    text = str(value).strip()
+    if not text:
+        raise ValueError("the value is empty")
+    return text
 
 
 def _section(document: dict, name: str) -> dict:
@@ -155,6 +164,7 @@ def load_settings(path: str = DEFAULT_CONFIG_PATH) -> Settings:
         logger.warning("A token is configured but auth.enabled is false, so the API is open to anyone")
 
     return Settings(
+        host=_setting(server, "host", "HOST", _text, "0.0.0.0"),
         port=_setting(server, "port", "PORT", _within(1, 65535, int), 8123),
         dev_mode=_setting(server, "dev_mode", "DEV_MODE", _as_bool, False),
         discovery_timeout=_setting(discovery, "timeout", "DISCOVERY_TIMEOUT", _within(1, None, int), 3),

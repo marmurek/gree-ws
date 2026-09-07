@@ -25,6 +25,7 @@ All settings live in [`config.yaml`](config.yaml). The file is optional - every 
 
 ```yaml
 server:
+  host: "0.0.0.0"
   port: 8123
   dev_mode: false
 
@@ -45,6 +46,7 @@ auth:
 
 | Setting | Environment variable | Default | Meaning |
 |---|---|---|---|
+| `server.host` | `HOST` | `0.0.0.0` | Interface the API listens on |
 | `server.port` | `PORT` | `8123` | Port the API listens on |
 | `server.dev_mode` | `DEV_MODE` | `false` | Reload on source changes, for development |
 | `discovery.timeout` | `DISCOVERY_TIMEOUT` | `3` | How long to wait for units to answer the discovery broadcast, in seconds |
@@ -67,6 +69,15 @@ In Docker, set `CONFIG_FILE` or mount your own file over `/app/config.yaml`.
 ### 🔐 Authorisation
 
 Disabled by default: anyone who can reach the port can control the air conditioners. Since the container runs with `--network host`, that means every device on the local network.
+
+If you would rather not give every client a token, narrowing `server.host` is the other way to close that down — `127.0.0.1` for local access only, or a single interface address:
+
+```yaml
+server:
+  host: "127.0.0.1"
+```
+
+This restricts only the HTTP and WebSocket API. Device discovery keeps working, because it broadcasts over its own socket.
 
 To turn it on, set a token:
 

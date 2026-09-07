@@ -14,7 +14,7 @@ app = create_app(settings)
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        host=settings.host,
         port=settings.port,
         reload=settings.dev_mode,
         log_level="debug" if settings.verbose else "info",
