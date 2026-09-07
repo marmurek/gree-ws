@@ -1,0 +1,104 @@
+# Tooling configuration for the Gree Climate API.
+#
+# The project is not packaged - it ships as a Docker image built from
+# requirements.txt - so this file only carries developer tool settings.
+#
+#   pip install -r requirements-dev.txt
+#
+#   black .          format the code
+#   black --check .  verify formatting without touching files
+#   mypy             check types (files to check are configured below)
+#   pylint main.py gree_ws tests   check style and common mistakes
+#   pytest           run the test suite
+
+[tool.black]
+# Wider than the 88 default: the Pydantic field definitions and the FastAPI
+# route decorators in main.py read better on one line than wrapped.
+line-length = 120
+target-version = ["py313"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+
+# A deadlocked event loop cannot time itself out - asyncio.wait_for needs the
+# very loop that is stuck. Without an external timeout the suite would hang
+# forever instead of failing, so the deadlock regression tests need this.
+timeout = 60
+timeout_method = "signal"
+
+[tool.mypy]
+python_version = "3.13"
+files = ["main.py", "gree_ws", "tests"]
+
+# Without this mypy does not understand Pydantic field defaults and reports
+# every model construction as missing arguments.
+plugins = ["pydantic.mypy"]
+
+# greeclimate ships no py.typed marker, so its annotations are invisible to
+# mypy by default. Following the source anyway is what makes this check
+# worthwhile: it is how a rename like Device.beep -> Device.buzzer gets
+# reported as an error instead of silently doing nothing at runtime.
+follow_untyped_imports = true
+
+# Enough strictness to catch real mistakes without demanding a full
+# annotation pass on the existing code first.
+check_untyped_defs = true
+no_implicit_optional = true
+strict_equality = true
+extra_checks = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+warn_no_return = true
+
+# Require a reason on every suppression, and flag ones that stopped applying.
+enable_error_code = ["ignore-without-code", "redundant-expr"]
+
+pretty = true
+show_error_codes = true
+show_column_numbers = true
+
+[tool.pylint.main]
+py-version = "3.13"
+jobs = 0
+
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.pylint.basic]
+# The API enums deliberately use lower case members: the member name is the
+# value that goes out over REST and WebSocket.
+class-const-naming-style = "any"
+good-names = ["ws", "mac", "ip", "e", "f", "v"]
+
+[tool.pylint.design]
+# main.py is a small service, not a library. The view model mirrors every
+# device property, and send_update is a flat field-by-field mapping - both are
+# clearer long than split behind indirection.
+max-args = 8
+max-locals = 20
+max-branches = 30
+max-statements = 100
+max-attributes = 25
+max-public-methods = 25
+
+[tool.pylint."messages control"]
+disable = [
+    # Black owns formatting; pylint must not argue with it.
+    "line-too-long",
+    "trailing-whitespace",
+    "missing-final-newline",
+    "wrong-import-order",
+    "ungrouped-imports",
+    # Entry point module, not an importable API.
+    "missing-module-docstring",
+    # Pydantic models and enums are self-describing.
+    "too-few-public-methods",
+    # Deliberate throughout: every `except Exception` in main.py is an
+    # isolation boundary around one device or one client. The service logs and
+    # keeps running instead of letting a single misbehaving unit or WebSocket
+    # take the whole API down. Drop this entry if that stops being the rule.
+    "broad-exception-caught",
+]
