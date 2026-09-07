@@ -1,12 +1,15 @@
-"""Print the address the health check should probe.
+"""The container's health check.
 
-The check needs an address before it can probe anything, and both the interface
-and the port can come from the configuration file as easily as from the
-environment. Resolving them through the same loader keeps the probe and the
-application from disagreeing.
+Both the interface and the port can come from the configuration file as easily
+as from the environment, so the probe resolves them through the same loader as
+the application and the two cannot disagree. Doing the request here rather than
+with curl keeps an HTTP client out of the image.
 """
 
 import os
+import sys
+import urllib.error
+import urllib.request
 
 from gree_ws.config import DEFAULT_CONFIG_PATH, Settings, load_settings
 
@@ -26,5 +29,20 @@ def probe_address(settings: Settings) -> str:
     return f"{host}:{settings.port}"
 
 
+def main() -> int:
+    """Ask the running application whether it is healthy"""
+    address = probe_address(load_settings(os.environ.get("CONFIG_FILE", DEFAULT_CONFIG_PATH)))
+
+    try:
+        with urllib.request.urlopen(f"http://{address}/health", timeout=10) as response:
+            if response.status == 200:
+                return 0
+            print(f"{address} answered {response.status}", file=sys.stderr)
+    except (urllib.error.URLError, OSError) as e:
+        print(f"{address} is not answering: {e}", file=sys.stderr)
+
+    return 1
+
+
 if __name__ == "__main__":
-    print(probe_address(load_settings(os.environ.get("CONFIG_FILE", DEFAULT_CONFIG_PATH))))
+    sys.exit(main())

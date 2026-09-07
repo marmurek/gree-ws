@@ -253,6 +253,8 @@ docker run -it --name gree-ws --rm --network host \
 
 The container runs as an unprivileged user and its health check uses `GET /health`, which stays reachable when authorisation is on.
 
+The image is built in two stages. `greeclimate` depends on `netifaces`, whose last release was in 2021 and which publishes no wheel newer than CPython 3.9, so it has to be compiled — but the compiler is only needed to build it and never reaches the runtime image. The health check is written in Python rather than shelling out to `curl`, so the image needs no HTTP client either. Together that is about 200 MB less and no build tools in production.
+
 ### Run with Docker Compose
 Keep the settings in a file next to the compose file and mount it:
 
