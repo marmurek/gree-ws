@@ -1,5 +1,7 @@
 """Tests for reading settings from the configuration file and the environment."""
 
+import os
+
 import pytest
 
 from gree_ws.config import DEFAULT_CONFIG_PATH, AuthSettings, Settings, load_settings, parse_args
@@ -120,3 +122,97 @@ def test_the_command_line_only_locates_the_configuration():
 def test_another_runners_arguments_are_ignored():
     """Being imported by uvicorn or pytest must not break argument parsing"""
     assert parse_args(["--host", "0.0.0.0", "--reload", "-q"]).config == DEFAULT_CONFIG_PATH
+
+
+def test_a_blank_environment_variable_does_not_override_the_file(tmp_path, monkeypatch):
+    """Compose writes `- PORT=` as an empty string, which must not count as a setting.
+
+    Regression test: a blank override used to discard the file's value and fall
+    all the way back to the built-in default.
+    """
+    path = write_config(tmp_path, "server:\n  port: 8180\n")
+    monkeypatch.setenv("PORT", "")
+
+    assert load_settings(path).port == 8180
+
+
+def test_an_unusable_environment_variable_falls_back_to_the_file(tmp_path, monkeypatch):
+    """A typo in an override must not discard the configured value as well"""
+    path = write_config(tmp_path, "server:\n  port: 8180\n")
+    monkeypatch.setenv("PORT", "not-a-port")
+
+    assert load_settings(path).port == 8180
+
+
+def test_a_section_that_is_not_a_mapping_is_reported(tmp_path, caplog):
+    """`server: 8180` is a plausible mistake and must not fail silently"""
+    path = write_config(tmp_path, "server: 8180\n")
+
+    assert load_settings(path).port == Settings().port
+    assert "not a mapping" in caplog.text
+
+
+def test_an_unreadable_file_falls_back_to_defaults(tmp_path):
+    """A file mounted into the container may not be readable by the app's user.
+
+    Regression test: only YAML errors were caught, so a permission problem
+    crashed the application on startup.
+    """
+    path = write_config(tmp_path, "server:\n  port: 8180\n")
+    os.chmod(path, 0o000)
+    try:
+        assert load_settings(path) == Settings()
+    finally:
+        os.chmod(path, 0o644)
+
+
+@pytest.mark.parametrize(
+    "text, field_name",
+    [
+        ("polling:\n  interval: 0\n", "polling_interval"),
+        ("polling:\n  response_timeout: 0\n", "response_timeout"),
+        ("discovery:\n  timeout: 0\n", "discovery_timeout"),
+        ("server:\n  port: 0\n", "port"),
+        ("server:\n  port: 99999\n", "port"),
+    ],
+)
+def test_values_outside_a_usable_range_are_refused(tmp_path, text, field_name):
+    """Zero would mean hammering the units, finding nothing, or an unbindable port"""
+    path = write_config(tmp_path, text)
+
+    assert getattr(load_settings(path), field_name) == getattr(Settings(), field_name)
+
+
+def test_an_unrecognised_boolean_is_refused(tmp_path, monkeypatch):
+    """A value that is neither true nor false must not quietly mean false"""
+    path = write_config(tmp_path, "logging:\n  verbose: true\n")
+    monkeypatch.setenv("VERBOSE", "perhaps")
+
+    assert load_settings(path).verbose is True
+
+
+@pytest.mark.parametrize("word", ["off", "no", "0", "false"])
+def test_the_usual_false_spellings_are_understood(tmp_path, monkeypatch, word):
+    """An explicit false in the environment turns a file's true off"""
+    path = write_config(tmp_path, "logging:\n  verbose: true\n")
+    monkeypatch.setenv("VERBOSE", word)
+
+    assert load_settings(path).verbose is False
+
+
+def test_a_token_is_stripped(tmp_path, monkeypatch):
+    """A token read from a secret file usually arrives with a newline"""
+    path = write_config(tmp_path, "auth:\n  enabled: true\n")
+    monkeypatch.setenv("AUTH_TOKEN", "  s3cret\n")
+
+    assert load_settings(path).auth == AuthSettings(enabled=True, token="s3cret")
+
+
+def test_a_token_without_authorisation_is_reported(tmp_path, caplog):
+    """Setting only a token leaves the API open, which is worth saying out loud"""
+    path = write_config(tmp_path, "auth:\n  enabled: false\n  token: 's3cret'\n")
+
+    settings = load_settings(path)
+
+    assert settings.auth.enabled is False
+    assert "open to anyone" in caplog.text

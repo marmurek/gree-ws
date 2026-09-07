@@ -279,7 +279,14 @@ services:
       - POLLING_INTERVAL=60
 ```
 
-The two can be combined, but remember that an environment variable always wins over the file — a `PORT` left in the compose file will quietly override the `port` in a mounted configuration.
+The two can be combined, but remember that an environment variable always wins over the file — a `PORT` left in the compose file will override the `port` in a mounted configuration.
+
+A few things worth knowing about how settings are resolved:
+
+- A blank environment variable (`- PORT=` in compose) counts as unset, not as an override.
+- A value that cannot be used — a misspelled number, a boolean that is neither true nor false, a port outside 1-65535, a polling interval below 1 — is reported in the log and the next source down is used, so a typo in an environment variable falls back to the file rather than discarding it too.
+- A configuration file that cannot be read or parsed is reported and the application starts on the defaults rather than refusing to run. Watch for this with a mounted file: the container runs as an unprivileged user and a file mounted `root:root` with mode `600` will not be readable.
+- Setting `auth.token` without `auth.enabled` leaves the API open; the log says so.
 
 ## 🧑‍💻 Development
 
