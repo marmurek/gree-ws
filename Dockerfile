@@ -24,19 +24,22 @@ COPY config.yaml .
 RUN useradd --create-home --uid 10001 gree
 USER gree
 
-# Expose port
-ENV PORT=8123
+# The default port. Deliberately not an ENV: the environment takes precedence
+# over the configuration file, so an ENV here would silently override the port
+# set in a mounted config.yaml.
 EXPOSE 8123
 
-# Defaults live in config.yaml. These environment variables override it, and
-# are the way to configure the container without rebuilding or mounting a file.
-#   DISCOVERY_TIMEOUT  POLLING_INTERVAL  RESPONSE_TIMEOUT  VERBOSE
+# Settings live in config.yaml. Every one of them can be overridden by an
+# environment variable, which is how to configure the container without
+# mounting a file:
+#   PORT  DISCOVERY_TIMEOUT  POLLING_INTERVAL  RESPONSE_TIMEOUT  VERBOSE
 #   AUTH_ENABLED  AUTH_TOKEN  CONFIG_FILE
 
-# Health check
-# /health stays reachable without a token, so the probe works with auth enabled.
+# Health check. The port is resolved the same way the application resolves it,
+# so the probe follows the configuration file as well as the environment.
+# /health stays reachable without a token, so this works with auth enabled.
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8123}/health || exit 1
+    CMD ["sh", "-c", "curl -fsS \"http://localhost:$(python3 -m gree_ws.port)/health\""]
 
 # Run the application
 ENTRYPOINT ["./entrypoint.sh"]

@@ -243,20 +243,43 @@ docker run -it --name gree-ws --rm --network host \
 The container runs as an unprivileged user and its health check uses `GET /health`, which stays reachable when authorisation is on.
 
 ### Run with Docker Compose
-You can also use Docker Compose to run the application. Create a `docker-compose.yml` file with the following content:
+Keep the settings in a file next to the compose file and mount it:
+
+```yaml
+services:
+  gree-ws:
+    build: .
+    image: gree-ws
+    container_name: gree-ws
+    # Device discovery uses UDP broadcast, which needs the host network.
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./gree-ws.yaml:/app/config.yaml:ro
+```
+
+```yaml
+# gree-ws.yaml - only what differs from the defaults
+server:
+  port: 8180
+
+polling:
+  interval: 60
+```
+
+Or configure it entirely from the environment, without a file:
+
 ```yaml
 services:
   gree-ws:
     build: .
     network_mode: host
     environment:
-      - PORT=8123
-      - DISCOVERY_TIMEOUT=5
-      - POLLING_INTERVAL=1
-    # Or keep the settings in a file instead:
-    # volumes:
-    #   - ./config.yaml:/app/config.yaml:ro
+      - PORT=8180
+      - POLLING_INTERVAL=60
 ```
+
+The two can be combined, but remember that an environment variable always wins over the file — a `PORT` left in the compose file will quietly override the `port` in a mounted configuration.
 
 ## 🧑‍💻 Development
 
