@@ -208,7 +208,7 @@ The `message_id` field is absent when the request could not be parsed as JSON.
 
 Full schemas are in [/docs](http://localhost:8123/docs); these do not behave the way the names suggest.
 
-- **`buzzer`** - whether the unit beeps when it receives a command. It is not stored on the air conditioner: it lives in the application's memory, defaults to enabled and goes back to enabled after a restart or a `POST /discover`. Send `"buzzer": false` to silence the unit.
+- **`buzzer`** - whether the unit beeps when it receives a command. It is not stored on the air conditioner: it lives in the application's memory, defaults to enabled and goes back to enabled after a restart or a `POST /discover`. Send `"buzzer": false` to silence the unit. Every command carries `BuzzerCtrl`, the flag newer firmware reads, and while the beep is disabled also `Buzzer_ON_OFF`, the one older firmware reads; both are sent regardless of the unit's firmware.
 - **`available`** - whether the device is currently answering. It is an ordinary field, so it is served by `/devices` like any other value and a change is reported through the usual `report` message:
   ```json
   {
@@ -262,7 +262,7 @@ docker run -it --name gree-ws --rm --network host \
 
 The container runs as an unprivileged user and its health check uses `GET /health`, which stays reachable when authorisation is on.
 
-The image is built in two stages. `greeclimate` depends on `netifaces`, whose last release was in 2021 and which publishes no wheel newer than CPython 3.9, so it has to be compiled — but the compiler is only needed to build it and never reaches the runtime image. The health check is written in Python rather than shelling out to `curl`, so the image needs no HTTP client either. Together that is about 200 MB less and no build tools in production.
+Every dependency installs from a prebuilt wheel, so the image contains no compiler or build tools. The health check is written in Python rather than shelling out to `curl`, so the image needs no HTTP client either.
 
 ### Run with Docker Compose
 Keep the settings in a file next to the compose file and mount it:

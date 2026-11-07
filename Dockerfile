@@ -1,29 +1,12 @@
-# --- Build stage -------------------------------------------------------------
-# greeclimate depends on netifaces, whose last release was in 2021 and which
-# publishes no wheel newer than CPython 3.9, so it has to be compiled. The
-# compiler is needed for that and for nothing else, so it stays in this stage.
-FROM python:3.13-slim AS builder
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libc6-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-
-# --- Runtime stage -----------------------------------------------------------
+# Every dependency ships a wheel for this Python, so the image needs no
+# compiler. --only-binary makes the build fail rather than compile one that
+# stops shipping a wheel.
 FROM python:3.13-slim
 
 WORKDIR /app
 
-# Only the finished packages cross over; no compiler and no build tools.
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+COPY requirements.txt .
+RUN pip install --no-cache-dir --only-binary=:all: -r requirements.txt
 
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
@@ -44,9 +27,8 @@ EXPOSE 8123
 
 # Settings live in config.yaml. Every one of them can be overridden by an
 # environment variable, which is how to configure the container without
-# mounting a file:
-#   HOST  PORT  DISCOVERY_TIMEOUT  POLLING_INTERVAL  RESPONSE_TIMEOUT  VERBOSE
-#   AUTH_ENABLED  AUTH_TOKEN  CONFIG_FILE
+# mounting a file; the Configuration table in README.md lists them.
+# CONFIG_FILE selects a different configuration file.
 
 # Health check. It resolves the address the same way the application does, so
 # it follows the configuration file as well as the environment, including an

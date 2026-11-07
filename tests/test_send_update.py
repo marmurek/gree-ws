@@ -54,11 +54,14 @@ async def test_unchanged_values_report_no_modification(manager):
 
 @pytest.mark.asyncio
 async def test_only_requested_fields_are_sent(manager, device):
-    """Fields left out of the request are not part of the command"""
+    """Fields left out of the request are not part of the command.
+
+    BuzzerCtrl is added by greeclimate to every command, not by the request.
+    """
     await manager.send_update(MAC, DeviceUpdateModel(power=False))
 
     command = device.last_command()
-    assert set(command) == {"Pow"}
+    assert set(command) == {"Pow", "BuzzerCtrl"}
 
 
 @pytest.mark.asyncio
@@ -66,16 +69,20 @@ async def test_buzzer_disabled_adds_the_suppression_flag(manager, device):
     """buzzer=false silences the unit on every command"""
     await manager.send_update(MAC, DeviceUpdateModel(buzzer=False, power=False))
 
-    assert device.last_command().get("Buzzer_ON_OFF") == 1
+    command = device.last_command()
+    assert command.get("Buzzer_ON_OFF") == 1
+    assert command.get("BuzzerCtrl") == 0
     assert device.buzzer is False
 
 
 @pytest.mark.asyncio
-async def test_buzzer_enabled_is_the_default_and_adds_nothing(manager, device):
-    """The library default leaves the beep on and sends no extra flag"""
+async def test_buzzer_enabled_is_the_default_and_keeps_the_beep_on(manager, device):
+    """The library default leaves the beep on and does not send the suppression flag"""
     await manager.send_update(MAC, DeviceUpdateModel(power=False))
 
-    assert "Buzzer_ON_OFF" not in device.last_command()
+    command = device.last_command()
+    assert "Buzzer_ON_OFF" not in command
+    assert command.get("BuzzerCtrl") == 1
     assert device.buzzer is True
 
 
