@@ -18,6 +18,12 @@ server:
 discovery:
   # How long to wait for units to answer the discovery broadcast, in seconds.
   timeout: 3
+  # A request for a MAC address that is not in the roster triggers a discovery
+  # scan for that unit, so one that came online after startup is picked up
+  # without a manual POST /discover. After a scan that did not find the unit,
+  # further requests for the same address are answered with "not found" for this
+  # many seconds instead of scanning again. 0 scans on every such request.
+  lookup_cooldown: 10
 
 polling:
   # How often to ask each unit for its state, in seconds.

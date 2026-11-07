@@ -3,8 +3,10 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import MAC
+from conftest import MAC, device_info
 from gree_ws import api, models
+
+OTHER_MAC = "aabbcc334455"
 
 
 @pytest.fixture(name="client")
@@ -54,9 +56,82 @@ def test_device_view_is_returned(client, manager):
     assert response.json()["mac"] == MAC
 
 
-def test_unknown_device_returns_404(client):
-    """An unknown MAC is a 404, not a crash"""
+def test_unknown_device_returns_404(client, discovery):
+    """An unknown MAC that does not answer a scan is a 404, not a crash"""
+    discovery([])
+
     assert client.get("/devices/ffffffffffff").status_code == 404
+
+
+def test_a_unit_that_came_online_later_is_served(client, manager, discovery):
+    """A GET for a unit missing from the roster finds it on the network"""
+    discovery([device_info(mac=OTHER_MAC, ip="1.1.1.1")])
+
+    response = client.get(f"/devices/{OTHER_MAC}")
+
+    assert response.status_code == 200
+    assert response.json()["mac"] == OTHER_MAC
+    assert OTHER_MAC in manager.polling_tasks
+
+
+def test_a_command_to_a_unit_that_came_online_later_lands(client, discovery):
+    """A PATCH for a unit missing from the roster finds it and sends the command"""
+    discovery([device_info(mac=OTHER_MAC, ip="1.1.1.1")])
+
+    response = client.patch(f"/devices/{OTHER_MAC}", json={"target_temperature": 24})
+
+    assert response.status_code == 204
+
+
+def test_a_command_to_an_absent_unit_is_404(client, discovery):
+    """A PATCH for a unit nowhere on the network is still a 404"""
+    discovery([])
+
+    assert client.patch(f"/devices/{OTHER_MAC}", json={"target_temperature": 24}).status_code == 404
+
+
+def test_a_websocket_command_to_a_unit_that_came_online_later_lands(client, discovery):
+    """The WebSocket update finds a missing unit the same way REST does"""
+    discovery([device_info(mac=OTHER_MAC, ip="1.1.1.1")])
+
+    with client.websocket_connect("/ws") as socket:
+        assert socket.receive_json()["type"] == "list"
+        socket.send_json({"type": "update", "mac": OTHER_MAC, "message_id": "m3", "data": {"target_temperature": 24}})
+        reply = socket.receive_json()
+
+    assert reply["type"] == "applied"
+    assert reply["mac"] == OTHER_MAC
+    assert reply["message_id"] == "m3"
+
+
+def test_a_websocket_command_to_an_absent_unit_is_not_found(client, discovery):
+    """A unit nowhere on the network is reported as not found over WebSocket"""
+    discovery([])
+
+    with client.websocket_connect("/ws") as socket:
+        assert socket.receive_json()["type"] == "list"
+        socket.send_json({"type": "update", "mac": OTHER_MAC, "message_id": "m4", "data": {"power": True}})
+        reply = socket.receive_json()
+
+    assert reply == {"type": "error", "message_id": "m4", "message": "Device not found"}
+
+
+@pytest.mark.parametrize("mac", [None, "", "AABBCC334455", "aa:bb:cc:33:44:55", "not-a-mac", 123])
+def test_a_malformed_websocket_mac_never_triggers_a_scan(client, monkeypatch, mac):
+    """Only a well formed address is worth a discovery broadcast"""
+
+    async def scan(*_args, **_kwargs):
+        raise AssertionError("a malformed MAC must not trigger a scan")
+
+    monkeypatch.setattr("greeclimate.discovery.Discovery.scan", scan)
+
+    with client.websocket_connect("/ws") as socket:
+        assert socket.receive_json()["type"] == "list"
+        socket.send_json({"type": "update", "mac": mac, "message_id": "m5", "data": {"power": True}})
+        reply = socket.receive_json()
+
+    assert reply["type"] == "error"
+    assert reply["message"] == "Invalid or missing MAC address"
 
 
 def test_malformed_mac_is_rejected(client):

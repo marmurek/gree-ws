@@ -6,7 +6,7 @@ Advanced REST and WebSocket API for controlling Gree air conditioners with real-
 
 ## ✨ Features
 
-- **Automatic device discovery** - Scans the network for Gree air conditioners on startup and on demand
+- **Automatic device discovery** - Scans the network for Gree air conditioners on startup, on demand, and when a request names a unit that is not known yet
 - **REST API** - Full RESTful API for device control
 - **WebSocket** - Real-time communication with clients
 - **State monitoring** - Automatic polling at a specified interval
@@ -31,6 +31,7 @@ server:
 
 discovery:
   timeout: 3
+  lookup_cooldown: 10
 
 polling:
   interval: 2
@@ -50,6 +51,7 @@ auth:
 | `server.port` | `PORT` | `8123` | Port the API listens on |
 | `server.dev_mode` | `DEV_MODE` | `false` | Reload on source changes, for development |
 | `discovery.timeout` | `DISCOVERY_TIMEOUT` | `3` | How long to wait for units to answer the discovery broadcast, in seconds |
+| `discovery.lookup_cooldown` | `DISCOVERY_LOOKUP_COOLDOWN` | `10` | After a scan for an unknown MAC found nothing, answer requests for that MAC with "not found" for this many seconds instead of scanning again; `0` scans on every request |
 | `polling.interval` | `POLLING_INTERVAL` | `2` | How often to ask each unit for its state, in seconds |
 | `polling.response_timeout` | `RESPONSE_TIMEOUT` | `5` | How long to wait for a unit to answer, in seconds |
 | `logging.verbose` | `VERBOSE` | `false` | Log every packet exchanged with the units |
@@ -108,6 +110,12 @@ A request without a valid token gets `401`; a WebSocket is closed with code `100
 ## 🔌 REST API
 
 API documentation is available at: [http://localhost:8123/docs](http://localhost:8123/docs)
+
+### Units that come online after startup
+
+A unit that was switched off or still joining Wi-Fi when the application started is not in the device list. A request that names it by MAC address — `GET /devices/{mac}`, `PATCH /devices/{mac}` or a WebSocket `update` — triggers a discovery scan for that unit. If it answers and binds, it joins the device list, polling starts for it and the request is served as usual; other units keep polling undisturbed. Otherwise the request gets `404` over REST, or an `error` with the message `Device not found` over WebSocket.
+
+Such a request takes up to `discovery.timeout` seconds longer while the scan runs. Concurrent requests for the same unit share one scan, and after a scan that found nothing the same MAC is answered without scanning for `discovery.lookup_cooldown` seconds. `POST /discover` is still available for a full rediscovery.
 
 ## 🔌 WebSocket API
 

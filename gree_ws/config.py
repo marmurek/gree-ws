@@ -30,6 +30,7 @@ class Settings:
     port: int = 8123
     dev_mode: bool = False
     discovery_timeout: int = 3
+    lookup_cooldown: int = 10
     polling_interval: int = 2
     response_timeout: float = 5.0
     verbose: bool = False
@@ -168,6 +169,7 @@ def load_settings(path: str = DEFAULT_CONFIG_PATH) -> Settings:
         port=_setting(server, "port", "PORT", _within(1, 65535, int), 8123),
         dev_mode=_setting(server, "dev_mode", "DEV_MODE", _as_bool, False),
         discovery_timeout=_setting(discovery, "timeout", "DISCOVERY_TIMEOUT", _within(1, None, int), 3),
+        lookup_cooldown=_setting(discovery, "lookup_cooldown", "DISCOVERY_LOOKUP_COOLDOWN", _within(0, None, int), 10),
         polling_interval=_setting(polling, "interval", "POLLING_INTERVAL", _within(1, None, int), 2),
         response_timeout=_setting(polling, "response_timeout", "RESPONSE_TIMEOUT", _within(0.1, None, float), 5.0),
         verbose=_setting(logs, "verbose", "VERBOSE", _as_bool, False),

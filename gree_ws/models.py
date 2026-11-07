@@ -1,5 +1,6 @@
 """The API's data contract: the models served and accepted over REST and WebSocket."""
 
+import re
 from enum import Enum
 from typing import Annotated, List, Optional
 
@@ -10,9 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 # survive a write/read round trip. HUMIDITY_MIN/HUMIDITY_MAX come from greeclimate.
 HUMIDITY_STEP = 5
 
+MAC_PATTERN = re.compile(r"^[0-9a-f]{12}$")
+
 type MacAddress = Annotated[
     str,
-    StringConstraints(pattern=r"^[0-9a-f]{12}$"),
+    StringConstraints(pattern=MAC_PATTERN.pattern),
 ]
 type IpAddress = Annotated[
     str,

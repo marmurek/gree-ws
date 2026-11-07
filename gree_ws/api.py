@@ -12,7 +12,7 @@ from gree_ws import VERSION, auth as auth_module
 from gree_ws.config import Settings
 from gree_ws.errors import DeviceNotFound, DeviceUnavailable, GreeError, InvalidCommand
 from gree_ws.manager import GreeClimateManager
-from gree_ws.models import DeviceUpdateModel, DeviceViewModel, MacAddress, RootResponse
+from gree_ws.models import MAC_PATTERN, DeviceUpdateModel, DeviceViewModel, MacAddress, RootResponse
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ def create_app(settings: Settings) -> FastAPI:
     )
     async def get_device_view(mac: MacAddress) -> DeviceViewModel:
         """Get device view"""
-        if mac not in climate_manager.view_models:
+        if not await climate_manager.find_device(mac):
             raise HTTPException(status_code=404, detail="Device not found")
 
         return climate_manager.view_models[mac]
@@ -119,7 +119,7 @@ def create_app(settings: Settings) -> FastAPI:
     )
     async def send_device_update(mac: MacAddress, data: DeviceUpdateModel) -> Response:
         """Send update to device"""
-        if mac not in climate_manager.view_models:
+        if not await climate_manager.find_device(mac):
             raise HTTPException(status_code=404, detail="Device not found")
 
         if not await climate_manager.send_update(mac, data):
@@ -202,8 +202,13 @@ async def _handle_ws_message(websocket: WebSocket, climate_manager: GreeClimateM
             return
 
         mac = message.get("mac")
-        if not mac or mac not in climate_manager.view_models:
+        # Validate before the lookup so a malformed address never triggers a scan.
+        if not isinstance(mac, str) or not MAC_PATTERN.fullmatch(mac):
             await _send_ws(websocket, type="error", message_id=message_id, message="Invalid or missing MAC address")
+            return
+
+        if not await climate_manager.find_device(mac):
+            await _send_ws(websocket, type="error", message_id=message_id, message="Device not found")
             return
 
         command = DeviceUpdateModel(**message.get("data", {}))

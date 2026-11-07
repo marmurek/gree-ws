@@ -32,6 +32,7 @@ def test_settings_come_from_the_file(tmp_path):
           dev_mode: true
         discovery:
           timeout: 7
+          lookup_cooldown: 30
         polling:
           interval: 4
           response_timeout: 2.5
@@ -49,6 +50,7 @@ def test_settings_come_from_the_file(tmp_path):
     assert settings.port == 9000
     assert settings.dev_mode is True
     assert settings.discovery_timeout == 7
+    assert settings.lookup_cooldown == 30
     assert settings.polling_interval == 4
     assert settings.response_timeout == 2.5
     assert settings.verbose is True
@@ -174,6 +176,7 @@ def test_an_unreadable_file_falls_back_to_defaults(tmp_path):
         ("polling:\n  interval: 0\n", "polling_interval"),
         ("polling:\n  response_timeout: 0\n", "response_timeout"),
         ("discovery:\n  timeout: 0\n", "discovery_timeout"),
+        ("discovery:\n  lookup_cooldown: -1\n", "lookup_cooldown"),
         ("server:\n  port: 0\n", "port"),
         ("server:\n  port: 99999\n", "port"),
     ],
@@ -238,3 +241,11 @@ def test_a_blank_interface_is_refused(tmp_path):
     path = write_config(tmp_path, 'server:\n  host: ""\n')
 
     assert load_settings(path).host == Settings().host
+
+
+def test_the_lookup_cooldown_can_come_from_the_environment(tmp_path, monkeypatch):
+    """Zero is a valid cooldown: it scans on every request for an unknown unit"""
+    path = write_config(tmp_path, "discovery:\n  lookup_cooldown: 30\n")
+    monkeypatch.setenv("DISCOVERY_LOOKUP_COOLDOWN", "0")
+
+    assert load_settings(path).lookup_cooldown == 0

@@ -83,11 +83,11 @@ class GreeClimateManager:
         self.devices: Dict[MacAddress, GreeDevice] = {}
         self.missed_responses: Dict[MacAddress, int] = {}
         self.discovery_lock = asyncio.Lock()
-        self.discovery = Discovery()
         self.connection_manager = ConnectionManager()
         self.view_models: Dict[MacAddress, DeviceViewModel] = {}
         self.measurement_timestamps: Dict[MacAddress, float] = {}
         self.polling_tasks: Dict[MacAddress, asyncio.Task] = {}
+        self.lookup_timestamps: Dict[MacAddress, float] = {}
 
     # Discovery and the device roster
 
@@ -96,13 +96,60 @@ class GreeClimateManager:
         async with self.discovery_lock:
             return await self._discover_devices()
 
+    async def find_device(self, mac: MacAddress) -> bool:
+        """Report whether a unit is in the roster, scanning for it once if it is not.
+
+        A unit that was powered off or still connecting to Wi-Fi at startup
+        would otherwise stay unreachable until a full rediscovery. Only the
+        requested unit is bound and polling of the others is left running.
+        """
+        if mac in self.view_models:
+            return True
+
+        async with self.discovery_lock:
+            # A concurrent request may have found the unit while this one waited.
+            if mac in self.view_models:
+                return True
+
+            # Without a cooldown a client retrying an unknown address would put a
+            # discovery broadcast on the network for every request.
+            now = asyncio.get_running_loop().time()
+            last_lookup = self.lookup_timestamps.get(mac)
+            if last_lookup is not None and now - last_lookup < self.settings.lookup_cooldown:
+                return False
+            self.lookup_timestamps[mac] = now
+
+            logger.info("Device %s is not known, scanning for it", mac)
+            info = next((i for i in await self._scan() if normalize_mac(i.mac) == mac), None)
+            if info is None:
+                logger.info("Device %s did not answer the discovery scan", mac)
+                return False
+
+            # A unit can be in the roster without a view if enrolling it failed
+            # earlier, so success means a new object replaced whatever was there.
+            previous = self.devices.get(mac)
+            await self._bind_device(info)
+            if self.devices.get(mac) is previous:
+                return False
+
+            self.view_models[mac] = await self.device_view(mac, update_state=False)
+            await self._start_polling_for_device(mac)
+            self.lookup_timestamps.pop(mac, None)
+            return True
+
     async def _scan(self) -> list:
         """Broadcast a discovery request, returning whatever answered"""
+        # Discovery.scan() returns every unit the instance has ever seen, so a
+        # long-lived instance would keep reporting units that no longer answer.
+        # A fresh instance per scan limits the result to this broadcast.
+        discovery = Discovery()
         try:
-            return await self.discovery.scan(wait_for=self.settings.discovery_timeout)
+            return list(await discovery.scan(wait_for=self.settings.discovery_timeout))
         except Exception as e:
             logger.error("Discovery failed: %s", e)
             return []
+        finally:
+            self._close_quietly(discovery)
 
     async def _discover_devices(self) -> List[MacAddress]:
         """Refresh the device roster, holding the discovery lock"""
@@ -171,14 +218,14 @@ class GreeClimateManager:
             self._close_quietly(device)
 
     @staticmethod
-    def _close_quietly(device: Optional[GreeDevice]) -> None:
-        """Release a device's socket, ignoring one that was never opened"""
-        if device is None:
+    def _close_quietly(endpoint: Optional[GreeDevice | Discovery]) -> None:
+        """Release a device's or a discovery's socket, ignoring one that was never opened"""
+        if endpoint is None:
             return
         try:
-            device.close()
+            endpoint.close()
         except Exception as e:  # the socket may never have been created
-            logger.debug("Closing device socket failed: %s", e)
+            logger.debug("Closing socket failed: %s", e)
 
     def _is_responsive(self, mac: MacAddress) -> bool:
         """Has this unit answered us recently enough to be considered alive"""
